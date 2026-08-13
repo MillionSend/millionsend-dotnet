@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <PackageId>MillionSend</PackageId>
+    <Version>0.0.1</Version>
+    <Authors>MillionSend</Authors>
+    <Description>Official .NET SDK for MillionSend — the open-source email platform. Under active development; this release reserves the package name.</Description>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/MillionSend</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/MillionSend/millionsend-dotnet</RepositoryUrl>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageTags>email;millionsend;ses;transactional-email</PackageTags>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+  </PropertyGroup>
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+</Project>
