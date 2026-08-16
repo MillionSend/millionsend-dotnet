@@ -187,13 +187,13 @@ Method names and payload shapes otherwise line up. Notes:
 ## Development
 
 ```bash
-dotnet test          # unit tests (the e2e test stays skipped)
+dotnet test          # unit tests (the e2e tests stay inert without MILLIONSEND_E2E)
 ```
 
-The e2e test runs only when `MILLIONSEND_API_KEY` is set:
+The e2e tests run only when `MILLIONSEND_E2E=1` opts in (plus the API key):
 
 ```bash
-MILLIONSEND_API_KEY=ms_... dotnet test --filter Category=e2e
+MILLIONSEND_E2E=1 MILLIONSEND_API_KEY=ms_... dotnet test --filter Category=e2e
 ```
 
 ## License

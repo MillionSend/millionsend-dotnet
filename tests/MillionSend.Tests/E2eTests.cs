@@ -5,18 +5,22 @@ using Xunit;
 namespace MillionSend.Tests;
 
 /// <summary>
-/// Opt-in smoke test against a real MillionSend instance. Runs only when
-/// MILLIONSEND_API_KEY is set (and MILLIONSEND_BASE_URL if not localhost:3001);
-/// otherwise it returns immediately without touching the network. Exercises the
+/// Opt-in smoke test against a real MillionSend instance. Gated on
+/// MILLIONSEND_E2E=1 — deliberately NOT on MILLIONSEND_API_KEY, which the SDK
+/// itself reads and a developer may have exported for other work; that would
+/// make plain `dotnet test` mutate a live instance. Requires the key (and
+/// MILLIONSEND_BASE_URL if not localhost:3001) as usual. Exercises the
 /// audience + contact lifecycle, which needs no verified sender domain.
 ///
-///     MILLIONSEND_API_KEY=ms_... MILLIONSEND_BASE_URL=http://localhost:3001 \
+///     MILLIONSEND_E2E=1 MILLIONSEND_API_KEY=ms_... \
 ///         dotnet test --filter Category=e2e
 /// </summary>
 [Trait("Category", "e2e")]
 public class E2eTests
 {
-    private static bool Enabled => !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("MILLIONSEND_API_KEY"));
+    private static bool Enabled =>
+        Environment.GetEnvironmentVariable("MILLIONSEND_E2E") == "1"
+        && !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("MILLIONSEND_API_KEY"));
 
     [Fact]
     public async Task Audience_and_contact_lifecycle()

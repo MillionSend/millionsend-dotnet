@@ -101,8 +101,19 @@ public sealed class MillionSendClient : IMillionSend
             var text = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
             if (!response.IsSuccessStatusCode)
                 return MillionSendResponse<T>.Fail(ParseError((int)response.StatusCode, text));
-            var content = string.IsNullOrEmpty(text) ? default : JsonSerializer.Deserialize<T>(text, Json);
-            return MillionSendResponse<T>.Ok(content);
+            try
+            {
+                var content = string.IsNullOrEmpty(text) ? default : JsonSerializer.Deserialize<T>(text, Json);
+                return MillionSendResponse<T>.Ok(content);
+            }
+            catch (JsonException ex)
+            {
+                // A 200 whose body is not the expected JSON (proxy interstitial,
+                // truncated response) is a client-side failure, not a throw —
+                // the documented contract is that methods never throw.
+                return MillionSendResponse<T>.Fail(
+                    new MillionSendException($"Unparseable response body: {ex.Message}", null, "application_error"));
+            }
         }
     }
 
