@@ -10,7 +10,7 @@ namespace MillionSend.Tests;
 /// itself reads and a developer may have exported for other work; that would
 /// make plain `dotnet test` mutate a live instance. Requires the key (and
 /// MILLIONSEND_BASE_URL if not localhost:3001) as usual. Exercises the
-/// audience + contact lifecycle, which needs no verified sender domain.
+/// contact lifecycle, which needs no verified sender domain.
 ///
 ///     MILLIONSEND_E2E=1 MILLIONSEND_API_KEY=ms_... \
 ///         dotnet test --filter Category=e2e
@@ -23,48 +23,40 @@ public class E2eTests
         && !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("MILLIONSEND_API_KEY"));
 
     [Fact]
-    public async Task Audience_and_contact_lifecycle()
+    public async Task Contact_lifecycle()
     {
         if (!Enabled) return; // gated: no key, no run
 
         var client = new MillionSendClient(new MillionSendClientOptions());
         var stamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        var email = $"sdk-e2e-{stamp}@example.com";
 
-        var audience = await client.AudienceAddAsync($"sdk-e2e-{stamp}");
-        Assert.True(audience.Success, audience.Exception?.Message);
-        var audienceId = audience.Content!.Id;
+        var created = await client.ContactAddAsync(new ContactCreateOptions
+        {
+            Email = email,
+            FirstName = "Ada",
+        });
+        Assert.True(created.Success, created.Exception?.Message);
 
         try
         {
-            var email = $"sdk-e2e-{stamp}@example.com";
-            var created = await client.ContactAddAsync(new ContactCreateOptions
-            {
-                AudienceId = audienceId,
-                Email = email,
-                FirstName = "Ada",
-            });
-            Assert.True(created.Success, created.Exception?.Message);
-
-            var fetched = await client.ContactRetrieveAsync(new ContactAddress { AudienceId = audienceId, Email = email });
+            var fetched = await client.ContactRetrieveAsync(new ContactAddress { Email = email });
             Assert.True(fetched.Success, fetched.Exception?.Message);
             Assert.Equal(email, fetched.Content!.Email);
             Assert.Equal("Ada", fetched.Content.FirstName);
 
             var updated = await client.ContactUpdateAsync(new ContactUpdateOptions
             {
-                AudienceId = audienceId,
                 Email = email,
                 Unsubscribed = true,
             });
             Assert.True(updated.Success, updated.Exception?.Message);
-
-            var removed = await client.ContactDeleteAsync(new ContactAddress { AudienceId = audienceId, Email = email });
-            Assert.True(removed.Success, removed.Exception?.Message);
-            Assert.True(removed.Content!.Deleted);
         }
         finally
         {
-            await client.AudienceDeleteAsync(audienceId);
+            var removed = await client.ContactDeleteAsync(new ContactAddress { Email = email });
+            Assert.True(removed.Success, removed.Exception?.Message);
+            Assert.True(removed.Content!.Deleted);
         }
     }
 

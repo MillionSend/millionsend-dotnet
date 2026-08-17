@@ -119,23 +119,6 @@ public sealed class DataResponse<T>
     public List<T> Data { get; init; } = new();
 }
 
-// ---- audiences -----------------------------------------------------------
-
-public sealed class Audience
-{
-    public string? Object { get; init; }
-    public Guid Id { get; init; }
-    public string? Name { get; init; }
-    public string? CreatedAt { get; init; }
-}
-
-public sealed class AudienceListItem
-{
-    public Guid Id { get; init; }
-    public string? Name { get; init; }
-    public string? CreatedAt { get; init; }
-}
-
 /// <summary>Paginated list envelope: <c>{ object:"list", data:[], has_more }</c>.</summary>
 public sealed class ListResponse<T>
 {
@@ -144,21 +127,10 @@ public sealed class ListResponse<T>
     public bool HasMore { get; init; }
 }
 
-/// <summary>Delete acknowledgement: <c>{ object, id, deleted:true }</c>.</summary>
-public sealed class DeleteResponse
-{
-    public string? Object { get; init; }
-    public Guid Id { get; init; }
-    public bool Deleted { get; init; }
-}
-
-// ---- contacts ------------------------------------------------------------
+// ---- contacts (team-global) ----------------------------------------------
 
 public sealed class ContactCreateOptions
 {
-    /// <summary>Scopes the create to <c>/audiences/{id}/contacts</c>; omit for the
-    /// top-level <c>/contacts</c>. Never sent in the body.</summary>
-    [JsonIgnore] public Guid? AudienceId { get; init; }
     public string Email { get; init; } = string.Empty;
     public string? FirstName { get; init; }
     public string? LastName { get; init; }
@@ -166,20 +138,17 @@ public sealed class ContactCreateOptions
     public Dictionary<string, object?>? Properties { get; init; }
 }
 
-/// <summary>Addresses a contact by id or email (email wins when both are set),
-/// optionally scoped to an audience.</summary>
+/// <summary>Addresses a contact by id or email (email wins when both are set).</summary>
 public sealed class ContactAddress
 {
     public Guid? Id { get; init; }
     public string? Email { get; init; }
-    public Guid? AudienceId { get; init; }
 }
 
 public sealed class ContactUpdateOptions
 {
     [JsonIgnore] public Guid? Id { get; init; }
     [JsonIgnore] public string? Email { get; init; }
-    [JsonIgnore] public Guid? AudienceId { get; init; }
     // ponytail: null omits the field (leave unchanged); explicit null-to-clear
     // isn't exposed. Add a tri-state wrapper here if clearing a field is needed.
     public string? FirstName { get; init; }
@@ -268,10 +237,11 @@ public sealed class RemoveTopicResponse
 
 // ---- broadcasts ----------------------------------------------------------
 
+/// <summary>Targeting is an optional <see cref="SegmentId"/> and/or
+/// <see cref="TopicId"/>; neither set sends to every contact of the team.</summary>
 public sealed class BroadcastCreateOptions
 {
     public string? Name { get; init; }
-    public Guid? AudienceId { get; init; }
     public Guid? SegmentId { get; init; }
     public string From { get; init; } = string.Empty;
     public string Subject { get; init; } = string.Empty;
@@ -284,7 +254,6 @@ public sealed class BroadcastCreateOptions
 public sealed class BroadcastUpdateOptions
 {
     public string? Name { get; init; }
-    public Guid? AudienceId { get; init; }
     public Guid? SegmentId { get; init; }
     public string? From { get; init; }
     public string? Subject { get; init; }
@@ -303,7 +272,6 @@ public class BroadcastListItem
 {
     public Guid Id { get; init; }
     public string? Name { get; init; }
-    public Guid? AudienceId { get; init; }
     public Guid? SegmentId { get; init; }
     public string? Status { get; init; }
     public string? CreatedAt { get; init; }
@@ -336,7 +304,7 @@ public sealed class RemoveBroadcastResponse
     public bool Deleted { get; init; }
 }
 
-// ---- segments (MillionSend dynamic segments) -----------------------------
+// ---- segments (saved filters over the team's contacts) -------------------
 
 public sealed class SegmentCondition
 {
@@ -354,7 +322,6 @@ public sealed class SegmentFilter
 public sealed class SegmentCreateOptions
 {
     public string Name { get; init; } = string.Empty;
-    public Guid AudienceId { get; init; }
     public SegmentFilter Filter { get; init; } = new();
 }
 
@@ -369,7 +336,6 @@ public sealed class Segment
     public string? Object { get; init; }
     public Guid Id { get; init; }
     public string? Name { get; init; }
-    public Guid AudienceId { get; init; }
     public SegmentFilter? Filter { get; init; }
     public string? CreatedAt { get; init; }
     public int? ContactCount { get; init; }

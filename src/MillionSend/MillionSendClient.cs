@@ -20,7 +20,7 @@ namespace MillionSend;
 public sealed class MillionSendClient : IMillionSend
 {
     private const string DefaultBaseUrl = "http://localhost:3001";
-    private const string Version = "0.1.0";
+    private const string Version = "0.2.0";
 
     private static readonly JsonSerializerOptions Json = new()
     {
@@ -158,11 +158,8 @@ public sealed class MillionSendClient : IMillionSend
     private static string Enc(string value) => Uri.EscapeDataString(value);
 
     // Email wins over id (matches the API's addressability).
-    private static string ContactPath(Guid? id, string? email, Guid? audienceId)
-    {
-        var key = !string.IsNullOrEmpty(email) ? Enc(email!) : (id?.ToString() ?? string.Empty);
-        return audienceId is Guid aid ? $"/audiences/{aid}/contacts/{key}" : $"/contacts/{key}";
-    }
+    private static string ContactPath(Guid? id, string? email)
+        => "/contacts/" + (!string.IsNullOrEmpty(email) ? Enc(email!) : (id?.ToString() ?? string.Empty));
 
     private static IReadOnlyDictionary<string, object?>? ListQuery(ListOptions? options)
     {
@@ -188,45 +185,25 @@ public sealed class MillionSendClient : IMillionSend
     public Task<MillionSendResponse<DataResponse<CreateEmailResponse>>> EmailBatchAsync(IEnumerable<EmailMessage> messages, string? idempotencyKey = null, CancellationToken cancellationToken = default)
         => SendAsync<DataResponse<CreateEmailResponse>>(HttpMethod.Post, "/emails/batch", messages.ToList(), idempotencyKey: idempotencyKey, cancellationToken: cancellationToken);
 
-    // ---- audiences -------------------------------------------------------
-
-    public Task<MillionSendResponse<Audience>> AudienceAddAsync(string name, CancellationToken cancellationToken = default)
-        => SendAsync<Audience>(HttpMethod.Post, "/audiences", new { name }, cancellationToken: cancellationToken);
-
-    public Task<MillionSendResponse<Audience>> AudienceRetrieveAsync(Guid id, CancellationToken cancellationToken = default)
-        => SendAsync<Audience>(HttpMethod.Get, $"/audiences/{id}", cancellationToken: cancellationToken);
-
-    public Task<MillionSendResponse<ListResponse<AudienceListItem>>> AudienceListAsync(ListOptions? options = null, CancellationToken cancellationToken = default)
-        => SendAsync<ListResponse<AudienceListItem>>(HttpMethod.Get, "/audiences", query: ListQuery(options), cancellationToken: cancellationToken);
-
-    public Task<MillionSendResponse<DeleteResponse>> AudienceDeleteAsync(Guid id, CancellationToken cancellationToken = default)
-        => SendAsync<DeleteResponse>(HttpMethod.Delete, $"/audiences/{id}", cancellationToken: cancellationToken);
-
-    // ---- contacts --------------------------------------------------------
+    // ---- contacts (team-global) ------------------------------------------
 
     public Task<MillionSendResponse<ContactId>> ContactAddAsync(ContactCreateOptions options, CancellationToken cancellationToken = default)
-    {
-        var path = options.AudienceId is Guid aid ? $"/audiences/{aid}/contacts" : "/contacts";
-        return SendAsync<ContactId>(HttpMethod.Post, path, options, cancellationToken: cancellationToken);
-    }
+        => SendAsync<ContactId>(HttpMethod.Post, "/contacts", options, cancellationToken: cancellationToken);
 
     public Task<MillionSendResponse<Contact>> ContactRetrieveAsync(ContactAddress address, CancellationToken cancellationToken = default)
-        => SendAsync<Contact>(HttpMethod.Get, ContactPath(address.Id, address.Email, address.AudienceId), cancellationToken: cancellationToken);
+        => SendAsync<Contact>(HttpMethod.Get, ContactPath(address.Id, address.Email), cancellationToken: cancellationToken);
 
     public Task<MillionSendResponse<ContactId>> ContactUpdateAsync(ContactUpdateOptions options, CancellationToken cancellationToken = default)
-        => SendAsync<ContactId>(HttpMethod.Patch, ContactPath(options.Id, options.Email, options.AudienceId), options, cancellationToken: cancellationToken);
+        => SendAsync<ContactId>(HttpMethod.Patch, ContactPath(options.Id, options.Email), options, cancellationToken: cancellationToken);
 
     public Task<MillionSendResponse<RemoveContactResponse>> ContactDeleteAsync(ContactAddress address, CancellationToken cancellationToken = default)
-        => SendAsync<RemoveContactResponse>(HttpMethod.Delete, ContactPath(address.Id, address.Email, address.AudienceId), cancellationToken: cancellationToken);
+        => SendAsync<RemoveContactResponse>(HttpMethod.Delete, ContactPath(address.Id, address.Email), cancellationToken: cancellationToken);
 
-    public Task<MillionSendResponse<ListResponse<ContactListItem>>> ContactListAsync(Guid? audienceId = null, ListOptions? options = null, CancellationToken cancellationToken = default)
-    {
-        var path = audienceId is Guid aid ? $"/audiences/{aid}/contacts" : "/contacts";
-        return SendAsync<ListResponse<ContactListItem>>(HttpMethod.Get, path, query: ListQuery(options), cancellationToken: cancellationToken);
-    }
+    public Task<MillionSendResponse<ListResponse<ContactListItem>>> ContactListAsync(ListOptions? options = null, CancellationToken cancellationToken = default)
+        => SendAsync<ListResponse<ContactListItem>>(HttpMethod.Get, "/contacts", query: ListQuery(options), cancellationToken: cancellationToken);
 
     public Task<MillionSendResponse<ContactId>> ContactTopicsUpdateAsync(ContactTopicsUpdateOptions options, CancellationToken cancellationToken = default)
-        => SendAsync<ContactId>(HttpMethod.Patch, ContactPath(options.Id, options.Email, null) + "/topics", options.Topics, cancellationToken: cancellationToken);
+        => SendAsync<ContactId>(HttpMethod.Patch, ContactPath(options.Id, options.Email) + "/topics", options.Topics, cancellationToken: cancellationToken);
 
     // ---- topics ----------------------------------------------------------
 
@@ -268,17 +245,17 @@ public sealed class MillionSendClient : IMillionSend
     // ---- segments --------------------------------------------------------
 
     public Task<MillionSendResponse<Segment>> SegmentAddAsync(SegmentCreateOptions options, CancellationToken cancellationToken = default)
-        => SendAsync<Segment>(HttpMethod.Post, "/segments2", options, cancellationToken: cancellationToken);
+        => SendAsync<Segment>(HttpMethod.Post, "/segments", options, cancellationToken: cancellationToken);
 
     public Task<MillionSendResponse<Segment>> SegmentRetrieveAsync(Guid id, CancellationToken cancellationToken = default)
-        => SendAsync<Segment>(HttpMethod.Get, $"/segments2/{id}", cancellationToken: cancellationToken);
+        => SendAsync<Segment>(HttpMethod.Get, $"/segments/{id}", cancellationToken: cancellationToken);
 
     public Task<MillionSendResponse<ListResponse<Segment>>> SegmentListAsync(ListOptions? options = null, CancellationToken cancellationToken = default)
-        => SendAsync<ListResponse<Segment>>(HttpMethod.Get, "/segments2", query: ListQuery(options), cancellationToken: cancellationToken);
+        => SendAsync<ListResponse<Segment>>(HttpMethod.Get, "/segments", query: ListQuery(options), cancellationToken: cancellationToken);
 
     public Task<MillionSendResponse<Segment>> SegmentUpdateAsync(Guid id, SegmentUpdateOptions options, CancellationToken cancellationToken = default)
-        => SendAsync<Segment>(HttpMethod.Patch, $"/segments2/{id}", options, cancellationToken: cancellationToken);
+        => SendAsync<Segment>(HttpMethod.Patch, $"/segments/{id}", options, cancellationToken: cancellationToken);
 
     public Task<MillionSendResponse<RemoveSegmentResponse>> SegmentDeleteAsync(Guid id, CancellationToken cancellationToken = default)
-        => SendAsync<RemoveSegmentResponse>(HttpMethod.Delete, $"/segments2/{id}", cancellationToken: cancellationToken);
+        => SendAsync<RemoveSegmentResponse>(HttpMethod.Delete, $"/segments/{id}", cancellationToken: cancellationToken);
 }

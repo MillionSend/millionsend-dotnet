@@ -92,26 +92,23 @@ await client.EmailBatchAsync(new[] { messageA, messageB }, idempotencyKey: "k");
 `EmailSendAsync` and `EmailBatchAsync` accept an optional `idempotencyKey` — the
 only two endpoints that support the `Idempotency-Key` header.
 
-### Audiences & contacts
+### Contacts
+
+Contacts are team-global: one record per email address (case-insensitive), no
+audiences. Creating a duplicate returns a 409 `validation_error`.
 
 ```csharp
-var audience = await client.AudienceAddAsync("Registered users");
-await client.AudienceListAsync(new ListOptions { Limit = 20, After = cursor });
-await client.AudienceRetrieveAsync(id);
-await client.AudienceDeleteAsync(id);
-
 await client.ContactAddAsync(new ContactCreateOptions
 {
-    AudienceId = audienceId,
     Email = "ada@acme.dev",
     FirstName = "Ada",
     Properties = new() { ["plan"] = "pro" },
 });
-await client.ContactRetrieveAsync(new ContactAddress { AudienceId = audienceId, Email = "ada@acme.dev" });
+await client.ContactRetrieveAsync(new ContactAddress { Email = "ada@acme.dev" });
 await client.ContactRetrieveAsync(new ContactAddress { Id = contactId });   // by id or email (email wins)
 await client.ContactUpdateAsync(new ContactUpdateOptions { Id = contactId, Unsubscribed = true });
 await client.ContactDeleteAsync(new ContactAddress { Email = "ada@acme.dev" });
-await client.ContactListAsync(audienceId: audienceId, options: new ListOptions { Limit = 50 });
+await client.ContactListAsync(new ListOptions { Limit = 50 });
 
 // Topic subscriptions (granular unsubscribe)
 await client.ContactTopicsUpdateAsync(new ContactTopicsUpdateOptions
@@ -134,13 +131,16 @@ await client.TopicDeleteAsync(id);
 
 ### Broadcasts
 
+Targeting is an optional `SegmentId` and/or `TopicId` — set neither to send to
+every contact of the team.
+
 ```csharp
 var broadcast = await client.BroadcastAddAsync(new BroadcastCreateOptions
 {
-    AudienceId = audienceId,
     From = "Acme <news@acme.dev>",
     Subject = "Launch",
     Html = "<p>Hi {{{FIRST_NAME|there}}}</p>",
+    SegmentId = segmentId, // optional
 });
 await client.BroadcastListAsync();
 await client.BroadcastRetrieveAsync(id);
@@ -152,14 +152,13 @@ await client.BroadcastDeleteAsync(id); // draft only
 
 ### Segments (MillionSend extension)
 
-Dynamic segments are a saved filter over an audience's contacts — a MillionSend
-superset with no Resend equivalent. The path is `/segments2`.
+Dynamic segments are a saved filter over the team's contacts — a MillionSend
+superset with no Resend equivalent.
 
 ```csharp
 await client.SegmentAddAsync(new SegmentCreateOptions
 {
     Name = "Pro plan",
-    AudienceId = audienceId,
     Filter = new SegmentFilter
     {
         Match = SegmentMatch.All,
@@ -181,8 +180,9 @@ Method names and payload shapes otherwise line up. Notes:
 
 - **Domains and API keys** are managed in the MillionSend dashboard, not via the
   API, so there are no domain/api-key methods here.
-- Resend's `segments` is an alias of audiences; MillionSend's **segments** are the
-  distinct dynamic-filter feature above. Use audiences for a straight port.
+- **No audiences**: contacts are team-global, one record per email address.
+  Resend's audience/segment grouping maps to MillionSend's dynamic **segments**
+  (saved filters) above.
 
 ## Development
 

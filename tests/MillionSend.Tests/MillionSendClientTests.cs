@@ -11,7 +11,6 @@ namespace MillionSend.Tests;
 
 public class MillionSendClientTests
 {
-    private static readonly Guid A1 = Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
     private static readonly Guid C1 = Guid.Parse("cccccccc-cccc-cccc-cccc-cccccccccccc");
     private static readonly Guid B1 = Guid.Parse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
     private static readonly Guid S1 = Guid.Parse("dddddddd-dddd-dddd-dddd-dddddddddddd");
@@ -56,11 +55,11 @@ public class MillionSendClientTests
         {
             var handler = new RecordingHandler();
             var client = new MillionSendClient(new MillionSendClientOptions(), new HttpClient(handler));
-            await client.AudienceRetrieveAsync(A1);
+            await client.TopicRetrieveAsync(T1);
 
             Assert.Equal("Bearer ms_env", handler.Last.Authorization);
             // Trailing slash on the base URL is trimmed.
-            Assert.Equal($"https://env.test/audiences/{A1}", handler.Last.Url);
+            Assert.Equal($"https://env.test/topics/{T1}", handler.Last.Url);
         }
         finally
         {
@@ -73,7 +72,7 @@ public class MillionSendClientTests
     public async Task Sends_auth_and_user_agent_headers()
     {
         var (client, handler) = NewClient();
-        await client.AudienceRetrieveAsync(A1);
+        await client.TopicRetrieveAsync(T1);
         Assert.Equal("Bearer ms_test", handler.Last.Authorization);
         Assert.StartsWith("millionsend-dotnet/", handler.Last.UserAgent);
     }
@@ -166,51 +165,23 @@ public class MillionSendClientTests
         Assert.Equal(2, res.Content!.Data.Count);
     }
 
-    // ---- audiences -------------------------------------------------------
-
-    [Fact]
-    public async Task Audiences_crud()
-    {
-        var (client, handler) = NewClient();
-
-        await client.AudienceAddAsync("Users");
-        Assert.Equal("POST", handler.Last.Method);
-        Assert.Equal("/audiences", handler.Last.Path);
-        Assert.Equal("Users", handler.LastJson().GetProperty("name").GetString());
-
-        await client.AudienceRetrieveAsync(A1);
-        Assert.Equal($"/audiences/{A1}", handler.Last.Path);
-
-        await client.AudienceListAsync(new ListOptions { Limit = 10 });
-        Assert.Equal("/audiences", handler.Last.Path);
-        Assert.Equal("?limit=10", handler.Last.Query);
-
-        await client.AudienceDeleteAsync(A1);
-        Assert.Equal("DELETE", handler.Last.Method);
-        Assert.Equal($"/audiences/{A1}", handler.Last.Path);
-    }
-
     // ---- contacts --------------------------------------------------------
 
     [Fact]
-    public async Task Contacts_create_scoped_and_top_level()
+    public async Task Contacts_create()
     {
         var (client, handler) = NewClient();
 
-        await client.ContactAddAsync(new ContactCreateOptions { AudienceId = A1, Email = "c@x.dev", FirstName = "Ada" });
-        Assert.Equal($"/audiences/{A1}/contacts", handler.Last.Path);
+        await client.ContactAddAsync(new ContactCreateOptions { Email = "c@x.dev", FirstName = "Ada" });
+        Assert.Equal("POST", handler.Last.Method);
+        Assert.Equal("/contacts", handler.Last.Path);
         var body = handler.LastJson();
         Assert.Equal("c@x.dev", body.GetProperty("email").GetString());
         Assert.Equal("Ada", body.GetProperty("first_name").GetString());
-        // audience_id scopes the path, never the body.
-        Assert.False(body.TryGetProperty("audience_id", out _));
-
-        await client.ContactAddAsync(new ContactCreateOptions { Email = "c@x.dev" });
-        Assert.Equal("/contacts", handler.Last.Path);
     }
 
     [Fact]
-    public async Task Contacts_addressing_by_id_email_and_scope()
+    public async Task Contacts_addressing_by_id_and_email()
     {
         var (client, handler) = NewClient();
 
@@ -219,9 +190,6 @@ public class MillionSendClientTests
 
         await client.ContactRetrieveAsync(new ContactAddress { Email = "c@x.dev" });
         Assert.Equal("/contacts/" + Uri.EscapeDataString("c@x.dev"), handler.Last.Path);
-
-        await client.ContactRetrieveAsync(new ContactAddress { AudienceId = A1, Id = C1 });
-        Assert.Equal($"/audiences/{A1}/contacts/{C1}", handler.Last.Path);
     }
 
     [Fact]
@@ -255,8 +223,8 @@ public class MillionSendClientTests
         Assert.Equal("DELETE", handler.Last.Method);
         Assert.Equal("/contacts/" + Uri.EscapeDataString("c@x.dev"), handler.Last.Path);
 
-        await client.ContactListAsync(audienceId: A1, options: new ListOptions { After = C1 });
-        Assert.Equal($"/audiences/{A1}/contacts", handler.Last.Path);
+        await client.ContactListAsync(new ListOptions { After = C1 });
+        Assert.Equal("/contacts", handler.Last.Path);
         Assert.Equal($"?after={C1}", handler.Last.Query);
     }
 
@@ -310,10 +278,10 @@ public class MillionSendClientTests
     {
         var (client, handler) = NewClient();
 
-        await client.BroadcastAddAsync(new BroadcastCreateOptions { AudienceId = A1, From = "a@x.dev", Subject = "News", Html = "<p>hi</p>" });
+        await client.BroadcastAddAsync(new BroadcastCreateOptions { SegmentId = S1, From = "a@x.dev", Subject = "News", Html = "<p>hi</p>" });
         Assert.Equal("/broadcasts", handler.Last.Path);
         var created = handler.LastJson();
-        Assert.Equal(A1.ToString(), created.GetProperty("audience_id").GetString());
+        Assert.Equal(S1.ToString(), created.GetProperty("segment_id").GetString());
         Assert.Equal("a@x.dev", created.GetProperty("from").GetString());
 
         await client.BroadcastRetrieveAsync(B1);
@@ -345,7 +313,7 @@ public class MillionSendClientTests
     // ---- segments --------------------------------------------------------
 
     [Fact]
-    public async Task Segments_crud_on_segments2()
+    public async Task Segments_crud()
     {
         var (client, handler) = NewClient();
         var filter = new SegmentFilter
@@ -354,23 +322,22 @@ public class MillionSendClientTests
             Conditions = new List<SegmentCondition> { new() { Field = "email", Op = "is_set" } },
         };
 
-        await client.SegmentAddAsync(new SegmentCreateOptions { Name = "Active", AudienceId = A1, Filter = filter });
-        Assert.Equal("/segments2", handler.Last.Path);
+        await client.SegmentAddAsync(new SegmentCreateOptions { Name = "Active", Filter = filter });
+        Assert.Equal("/segments", handler.Last.Path);
         var body = handler.LastJson();
         Assert.Equal("Active", body.GetProperty("name").GetString());
-        Assert.Equal(A1.ToString(), body.GetProperty("audience_id").GetString());
         Assert.Equal("all", body.GetProperty("filter").GetProperty("match").GetString());
 
         await client.SegmentRetrieveAsync(S1);
-        Assert.Equal($"/segments2/{S1}", handler.Last.Path);
+        Assert.Equal($"/segments/{S1}", handler.Last.Path);
 
         await client.SegmentListAsync(new ListOptions { Before = S1 });
-        Assert.Equal("/segments2", handler.Last.Path);
+        Assert.Equal("/segments", handler.Last.Path);
         Assert.Equal($"?before={S1}", handler.Last.Query);
 
         await client.SegmentUpdateAsync(S1, new SegmentUpdateOptions { Name = "Renamed" });
         Assert.Equal("PATCH", handler.Last.Method);
-        Assert.Equal($"/segments2/{S1}", handler.Last.Path);
+        Assert.Equal($"/segments/{S1}", handler.Last.Path);
         var updated = handler.LastJson();
         Assert.Equal("Renamed", updated.GetProperty("name").GetString());
         Assert.False(updated.TryGetProperty("filter", out _));
@@ -390,7 +357,7 @@ public class MillionSendClientTests
             h.ResponseBody = "{\"statusCode\":422,\"name\":\"validation_error\",\"message\":\"bad input\"}";
         });
 
-        var res = await client.AudienceRetrieveAsync(A1);
+        var res = await client.TopicRetrieveAsync(T1);
         Assert.False(res.Success);
         Assert.Null(res.Content);
         Assert.NotNull(res.Exception);
@@ -408,7 +375,7 @@ public class MillionSendClientTests
             h.ResponseBody = "oops, not json";
         });
 
-        var res = await client.AudienceRetrieveAsync(A1);
+        var res = await client.TopicRetrieveAsync(T1);
         Assert.False(res.Success);
         Assert.Equal(500, res.Exception!.StatusCode);
         Assert.Equal("application_error", res.Exception.ErrorName);
@@ -420,7 +387,7 @@ public class MillionSendClientTests
     {
         var (client, _) = NewClient(h => h.Throw = new HttpRequestException("connection refused"));
 
-        var res = await client.AudienceRetrieveAsync(A1);
+        var res = await client.TopicRetrieveAsync(T1);
         Assert.False(res.Success);
         Assert.Null(res.Exception!.StatusCode);
         Assert.Equal("application_error", res.Exception.ErrorName);

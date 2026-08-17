@@ -18,18 +18,12 @@ public interface IMillionSend
     Task<MillionSendResponse<CancelEmailResponse>> EmailCancelAsync(Guid id, CancellationToken cancellationToken = default);
     Task<MillionSendResponse<DataResponse<CreateEmailResponse>>> EmailBatchAsync(IEnumerable<EmailMessage> messages, string? idempotencyKey = null, CancellationToken cancellationToken = default);
 
-    // Audiences
-    Task<MillionSendResponse<Audience>> AudienceAddAsync(string name, CancellationToken cancellationToken = default);
-    Task<MillionSendResponse<Audience>> AudienceRetrieveAsync(Guid id, CancellationToken cancellationToken = default);
-    Task<MillionSendResponse<ListResponse<AudienceListItem>>> AudienceListAsync(ListOptions? options = null, CancellationToken cancellationToken = default);
-    Task<MillionSendResponse<DeleteResponse>> AudienceDeleteAsync(Guid id, CancellationToken cancellationToken = default);
-
-    // Contacts
+    // Contacts (team-global)
     Task<MillionSendResponse<ContactId>> ContactAddAsync(ContactCreateOptions options, CancellationToken cancellationToken = default);
     Task<MillionSendResponse<Contact>> ContactRetrieveAsync(ContactAddress address, CancellationToken cancellationToken = default);
     Task<MillionSendResponse<ContactId>> ContactUpdateAsync(ContactUpdateOptions options, CancellationToken cancellationToken = default);
     Task<MillionSendResponse<RemoveContactResponse>> ContactDeleteAsync(ContactAddress address, CancellationToken cancellationToken = default);
-    Task<MillionSendResponse<ListResponse<ContactListItem>>> ContactListAsync(Guid? audienceId = null, ListOptions? options = null, CancellationToken cancellationToken = default);
+    Task<MillionSendResponse<ListResponse<ContactListItem>>> ContactListAsync(ListOptions? options = null, CancellationToken cancellationToken = default);
     Task<MillionSendResponse<ContactId>> ContactTopicsUpdateAsync(ContactTopicsUpdateOptions options, CancellationToken cancellationToken = default);
 
     // Topics
@@ -47,7 +41,7 @@ public interface IMillionSend
     Task<MillionSendResponse<BroadcastId>> BroadcastSendAsync(Guid id, string? scheduledAt = null, CancellationToken cancellationToken = default);
     Task<MillionSendResponse<CancelBroadcastResponse>> BroadcastCancelAsync(Guid id, CancellationToken cancellationToken = default);
 
-    // Segments (MillionSend extension, path /segments2)
+    // Segments (MillionSend extension: saved filters over the team's contacts)
     Task<MillionSendResponse<Segment>> SegmentAddAsync(SegmentCreateOptions options, CancellationToken cancellationToken = default);
     Task<MillionSendResponse<Segment>> SegmentRetrieveAsync(Guid id, CancellationToken cancellationToken = default);
     Task<MillionSendResponse<ListResponse<Segment>>> SegmentListAsync(ListOptions? options = null, CancellationToken cancellationToken = default);
