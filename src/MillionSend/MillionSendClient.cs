@@ -53,8 +53,19 @@ public sealed class MillionSendClient : IMillionSend
             ? Environment.GetEnvironmentVariable("MILLIONSEND_BASE_URL")
             : options.ApiUrl;
         _baseUrl = (string.IsNullOrEmpty(url) ? DefaultBaseUrl : url).TrimEnd('/');
+        if (!options.AllowInsecureHttp && IsInsecureHttpUrl(_baseUrl))
+            throw new ArgumentException(
+                $"Refusing to send the API key over plain http to {_baseUrl}. Use https, or set MillionSendClientOptions.AllowInsecureHttp = true.",
+                nameof(options));
 
         _http = httpClient ?? new HttpClient();
+    }
+
+    /// <summary>True for an http:// URL whose host is not loopback. Unparseable URLs are left to HttpClient.</summary>
+    private static bool IsInsecureHttpUrl(string url)
+    {
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) || uri.Scheme != Uri.UriSchemeHttp) return false;
+        return !uri.IsLoopback;
     }
 
     /// <summary>Convenience constructor. <paramref name="apiToken"/> and
@@ -78,15 +89,17 @@ public sealed class MillionSendClient : IMillionSend
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _apiKey);
         request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
         request.Headers.UserAgent.ParseAdd($"millionsend-dotnet/{Version}");
-        // Idempotency is POST-only on the wire; sending it elsewhere is a no-op.
-        if (idempotencyKey is not null && method == HttpMethod.Post)
-            request.Headers.TryAddWithoutValidation("Idempotency-Key", idempotencyKey);
         if (body is not null && (method == HttpMethod.Post || method == HttpMethod.Patch))
             request.Content = new StringContent(JsonSerializer.Serialize(body, Json), Encoding.UTF8, "application/json");
 
         HttpResponseMessage response;
         try
         {
+            // Idempotency is POST-only on the wire; sending it elsewhere is a no-op.
+            // Validated add: a caller-supplied key carrying CR/LF must never split
+            // into extra headers, so a bad key fails the call instead.
+            if (idempotencyKey is not null && method == HttpMethod.Post)
+                request.Headers.Add("Idempotency-Key", idempotencyKey);
             response = await _http.SendAsync(request, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex) when (!(ex is OperationCanceledException && cancellationToken.IsCancellationRequested))

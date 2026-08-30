@@ -69,6 +69,28 @@ public class MillionSendClientTests
     }
 
     [Fact]
+    public void Refuses_non_loopback_http_unless_allowed()
+    {
+        var priorUrl = Environment.GetEnvironmentVariable("MILLIONSEND_BASE_URL");
+        Environment.SetEnvironmentVariable("MILLIONSEND_BASE_URL", "http://mail.example.com");
+        try
+        {
+            Assert.Throws<ArgumentException>(() => new MillionSendClient("ms_test"));
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("MILLIONSEND_BASE_URL", priorUrl);
+        }
+        Assert.Throws<ArgumentException>(() => new MillionSendClient("ms_test", "http://mail.example.com"));
+        _ = new MillionSendClient(new MillionSendClientOptions
+        {
+            ApiToken = "ms_test", ApiUrl = "http://mail.example.com", AllowInsecureHttp = true,
+        });
+        _ = new MillionSendClient("ms_test", "http://localhost:3001");
+        _ = new MillionSendClient("ms_test", "http://127.0.0.1:3001");
+    }
+
+    [Fact]
     public async Task Sends_auth_and_user_agent_headers()
     {
         var (client, handler) = NewClient();
@@ -122,6 +144,19 @@ public class MillionSendClientTests
         var (client, handler) = NewClient();
         await client.EmailSendAsync(new EmailMessage { From = "a@x.dev", To = "b@x.dev", Subject = "s" }, idempotencyKey: "key-1");
         Assert.Equal("key-1", handler.Last.IdempotencyKey);
+    }
+
+    [Fact]
+    public async Task EmailSend_rejects_idempotency_key_with_crlf()
+    {
+        var (client, handler) = NewClient();
+        var res = await client.EmailSendAsync(
+            new EmailMessage { From = "a@x.dev", To = "b@x.dev", Subject = "s" },
+            idempotencyKey: "abc\r\nX-Injected: 1");
+        Assert.False(res.Success);
+        Assert.Null(res.Exception!.StatusCode);
+        Assert.Equal("application_error", res.Exception.ErrorName);
+        Assert.Empty(handler.Calls);
     }
 
     [Fact]

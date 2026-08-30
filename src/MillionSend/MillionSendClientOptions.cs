@@ -16,4 +16,10 @@ public sealed class MillionSendClientOptions
     /// self-hosted, so set this to your deployment in production.
     /// </summary>
     public string? ApiUrl { get; set; }
+
+    /// <summary>
+    /// Accept a plain <c>http://</c> <see cref="ApiUrl"/> on a non-loopback host. Off by
+    /// default because the API key travels as a bearer header.
+    /// </summary>
+    public bool AllowInsecureHttp { get; set; }
 }

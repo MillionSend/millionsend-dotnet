@@ -52,6 +52,10 @@ var client = new MillionSendClient(new MillionSendClientOptions
   key → throws at construction.
 - `ApiUrl` falls back to `MILLIONSEND_BASE_URL`, then `http://localhost:3001`.
   MillionSend is self-hosted, so **set this to your deployment in production.**
+- Plain `http://` is only accepted for loopback hosts (`localhost`, `127.0.0.1`, `::1`);
+  any other `http://` URL throws `ArgumentException` at construction, since the API key
+  is sent as a bearer header. Set `AllowInsecureHttp = true` on the options to talk to a
+  non-TLS instance elsewhere (e.g. inside a private network).
 
 You may pass your own `HttpClient` as the second argument (for proxies, custom
 handlers, or tests): `new MillionSendClient(options, httpClient)`.
