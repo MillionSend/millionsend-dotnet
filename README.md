@@ -89,12 +89,18 @@ if (!res.Success && res.Exception!.ErrorName == "not_found")
 ```csharp
 await client.EmailSendAsync(message, idempotencyKey: "unique-key"); // POST /emails
 await client.EmailRetrieveAsync(id);                                // GET /emails/{id}
+await client.EmailInsightsRetrieveAsync(id);                        // GET /emails/{id}/insights
 await client.EmailCancelAsync(id);                                  // POST /emails/{id}/cancel (scheduled only)
 await client.EmailBatchAsync(new[] { messageA, messageB }, idempotencyKey: "k"); // up to 100
 ```
 
 `EmailSendAsync` and `EmailBatchAsync` accept an optional `idempotencyKey` — the
 only two endpoints that support the `Idempotency-Key` header.
+
+`EmailRetrieveAsync` includes a `Score` (0–10 best-practice score, `null` when
+the email has no insights). `EmailInsightsRetrieveAsync` returns the full
+pre-send report — score, band, and per-check results — or a `not_found` error
+when insights are not available for the email.
 
 ### Contacts
 
@@ -173,6 +179,17 @@ await client.SegmentRetrieveAsync(id);   // includes a live contact_count
 await client.SegmentListAsync();
 await client.SegmentUpdateAsync(id, new SegmentUpdateOptions { Name = "Pro tier" });
 await client.SegmentDeleteAsync(id);
+```
+
+### Deliverability (MillionSend extension)
+
+The account-level deliverability score over the trailing window. Scores are
+0–10; `Score`/`Band` are `null` when there is not enough data yet.
+
+```csharp
+var res = await client.DeliverabilityRetrieveAsync(); // GET /deliverability
+if (res.Success)
+    Console.WriteLine($"{res.Content!.Score} ({res.Content.Band}), guardrail: {res.Content.GuardrailStatus}");
 ```
 
 ## Migrating from Resend

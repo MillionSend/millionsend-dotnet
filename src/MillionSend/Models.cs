@@ -104,6 +104,58 @@ public sealed class Email
     public string? ScheduledAt { get; init; }
     public string? MessageId { get; init; }
     public string? LastEvent { get; init; }
+    /// <summary>Best-practice score (0–10, one decimal); null when the email has no insights.</summary>
+    public double? Score { get; init; }
+}
+
+// Band, severity, status, and guardrail_status are open string sets on the
+// wire (new values arrive with new score versions); strict enum binding would
+// make a future value throw, so they stay strings.
+
+public sealed class InsightCheck
+{
+    /// <summary>Check id from the server's check catalog (open set).</summary>
+    public string? Id { get; init; }
+    public string? Severity { get; init; }
+    public string? Status { get; init; }
+    /// <summary>Points deducted from the score; 0 unless status is <c>fail</c>.</summary>
+    public double Penalty { get; init; }
+    /// <summary>Free-form JSON with check-specific context; absent for most checks.</summary>
+    public Dictionary<string, object?>? Detail { get; init; }
+}
+
+/// <summary>The pre-send best-practice report computed when the email was sent.</summary>
+public sealed class EmailInsights
+{
+    public string? Object { get; init; }
+    public Guid EmailId { get; init; }
+    /// <summary>Best-practice score, 0–10, one decimal.</summary>
+    public double Score { get; init; }
+    public int ScoreVersion { get; init; }
+    public string? Band { get; init; }
+    public bool Marketing { get; init; }
+    public int? HtmlSizeBytes { get; init; }
+    public string? ComputedAt { get; init; }
+    public List<InsightCheck> Checks { get; init; } = new();
+}
+
+/// <summary>Account deliverability over the trailing window. Scores are 0–10
+/// with one decimal; null means not enough data to compute.</summary>
+public sealed class Deliverability
+{
+    public string? Object { get; init; }
+    public double? Score { get; init; }
+    public string? Band { get; init; }
+    public double? ContentScore { get; init; }
+    public double? OutcomeScore { get; init; }
+    public double ComplaintRate { get; init; }
+    public double HardBounceRate { get; init; }
+    public long EmailsSent { get; init; }
+    public long ScoredRecipients { get; init; }
+    public int WindowDays { get; init; }
+    public bool InsufficientOutcomeData { get; init; }
+    public string? GuardrailStatus { get; init; }
+    public int ScoreVersion { get; init; }
 }
 
 public sealed class CancelEmailResponse

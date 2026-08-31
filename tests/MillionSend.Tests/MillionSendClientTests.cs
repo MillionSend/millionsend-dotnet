@@ -181,6 +181,114 @@ public class MillionSendClientTests
     }
 
     [Fact]
+    public async Task EmailRetrieve_deserializes_score()
+    {
+        var (client, _) = NewClient(h => h.ResponseBody =
+            $"{{\"object\":\"email\",\"id\":\"{E1}\",\"subject\":\"s\",\"score\":8.5}}");
+        var res = await client.EmailRetrieveAsync(E1);
+        Assert.True(res.Success);
+        Assert.Equal(8.5, res.Content!.Score);
+    }
+
+    [Fact]
+    public async Task EmailRetrieve_score_null_when_no_insights()
+    {
+        var (client, _) = NewClient(h => h.ResponseBody =
+            $"{{\"object\":\"email\",\"id\":\"{E1}\",\"subject\":\"s\",\"score\":null}}");
+        var res = await client.EmailRetrieveAsync(E1);
+        Assert.True(res.Success);
+        Assert.Null(res.Content!.Score);
+    }
+
+    [Fact]
+    public async Task EmailInsights_maps_path_and_deserializes()
+    {
+        var (client, handler) = NewClient(h => h.ResponseBody = $$"""
+            {
+              "object": "email_insights",
+              "email_id": "{{E1}}",
+              "score": 8.5,
+              "score_version": 1,
+              "band": "excellent",
+              "marketing": true,
+              "html_size_bytes": 12345,
+              "computed_at": "2026-08-31T12:00:00.000Z",
+              "checks": [
+                { "id": "list_unsubscribe", "severity": "critical", "status": "fail",
+                  "penalty": 1.25, "detail": { "reason": "missing_header", "count": 2 } },
+                { "id": "plain_text_part", "severity": "minor", "status": "pass", "penalty": 0 }
+              ]
+            }
+            """);
+
+        var res = await client.EmailInsightsRetrieveAsync(E1);
+        Assert.Equal("GET", handler.Last.Method);
+        Assert.Equal($"/emails/{E1}/insights", handler.Last.Path);
+        Assert.True(res.Success);
+
+        var insights = res.Content!;
+        Assert.Equal("email_insights", insights.Object);
+        Assert.Equal(E1, insights.EmailId);
+        Assert.Equal(8.5, insights.Score);
+        Assert.Equal(1, insights.ScoreVersion);
+        Assert.Equal("excellent", insights.Band);
+        Assert.True(insights.Marketing);
+        Assert.Equal(12345, insights.HtmlSizeBytes);
+        Assert.Equal("2026-08-31T12:00:00.000Z", insights.ComputedAt);
+
+        Assert.Equal(2, insights.Checks.Count);
+        var failed = insights.Checks[0];
+        Assert.Equal("list_unsubscribe", failed.Id);
+        Assert.Equal("critical", failed.Severity);
+        Assert.Equal("fail", failed.Status);
+        Assert.Equal(1.25, failed.Penalty);
+        Assert.Equal("missing_header", ((JsonElement)failed.Detail!["reason"]!).GetString());
+        Assert.Equal(2, ((JsonElement)failed.Detail!["count"]!).GetInt32());
+
+        var passed = insights.Checks[1];
+        Assert.Equal("pass", passed.Status);
+        Assert.Equal(0, passed.Penalty);
+        Assert.Null(passed.Detail);
+    }
+
+    [Fact]
+    public async Task EmailInsights_unknown_future_values_do_not_throw()
+    {
+        // Band/severity/status are open sets on the wire; a future value must
+        // deserialize, never throw.
+        var (client, _) = NewClient(h => h.ResponseBody = $$"""
+            {
+              "object": "email_insights", "email_id": "{{E1}}", "score": 5,
+              "score_version": 9, "band": "stellar", "marketing": false,
+              "html_size_bytes": null, "computed_at": "2026-08-31T12:00:00.000Z",
+              "checks": [ { "id": "brand_new_check", "severity": "catastrophic",
+                            "status": "deferred", "penalty": 0.5 } ]
+            }
+            """);
+        var res = await client.EmailInsightsRetrieveAsync(E1);
+        Assert.True(res.Success);
+        Assert.Equal("stellar", res.Content!.Band);
+        Assert.Null(res.Content.HtmlSizeBytes);
+        Assert.Equal("catastrophic", res.Content.Checks[0].Severity);
+        Assert.Equal("deferred", res.Content.Checks[0].Status);
+    }
+
+    [Fact]
+    public async Task EmailInsights_not_found_is_error_response()
+    {
+        var (client, _) = NewClient(h =>
+        {
+            h.Status = HttpStatusCode.NotFound;
+            h.ResponseBody = "{\"statusCode\":404,\"name\":\"not_found\",\"message\":\"Insights not found\"}";
+        });
+        var res = await client.EmailInsightsRetrieveAsync(E1);
+        Assert.False(res.Success);
+        Assert.Equal(404, res.Exception!.StatusCode);
+        Assert.Equal("not_found", res.Exception.ErrorName);
+        Assert.Equal("Insights not found", res.Exception.Message);
+    }
+
+    [Fact]
     public async Task Batch_sends_bare_array_with_idempotency()
     {
         var (client, handler) = NewClient(h => h.ResponseBody =
@@ -379,6 +487,71 @@ public class MillionSendClientTests
 
         await client.SegmentDeleteAsync(S1);
         Assert.Equal("DELETE", handler.Last.Method);
+    }
+
+    // ---- deliverability --------------------------------------------------
+
+    [Fact]
+    public async Task Deliverability_maps_path_and_deserializes()
+    {
+        var (client, handler) = NewClient(h => h.ResponseBody = """
+            {
+              "object": "deliverability",
+              "score": 8.7, "band": "good",
+              "content_score": 8.2, "outcome_score": 9.1,
+              "complaint_rate": 0.0002, "hard_bounce_rate": 0.001,
+              "emails_sent": 12345, "scored_recipients": 23456,
+              "window_days": 30, "insufficient_outcome_data": false,
+              "guardrail_status": "ok", "score_version": 1
+            }
+            """);
+
+        var res = await client.DeliverabilityRetrieveAsync();
+        Assert.Equal("GET", handler.Last.Method);
+        Assert.Equal("/deliverability", handler.Last.Path);
+        Assert.True(res.Success);
+
+        var d = res.Content!;
+        Assert.Equal("deliverability", d.Object);
+        Assert.Equal(8.7, d.Score);
+        Assert.Equal("good", d.Band);
+        Assert.Equal(8.2, d.ContentScore);
+        Assert.Equal(9.1, d.OutcomeScore);
+        Assert.Equal(0.0002, d.ComplaintRate);
+        Assert.Equal(0.001, d.HardBounceRate);
+        Assert.Equal(12345, d.EmailsSent);
+        Assert.Equal(23456, d.ScoredRecipients);
+        Assert.Equal(30, d.WindowDays);
+        Assert.False(d.InsufficientOutcomeData);
+        Assert.Equal("ok", d.GuardrailStatus);
+        Assert.Equal(1, d.ScoreVersion);
+    }
+
+    [Fact]
+    public async Task Deliverability_null_scores_and_unknown_guardrail_tolerated()
+    {
+        var (client, _) = NewClient(h => h.ResponseBody = """
+            {
+              "object": "deliverability",
+              "score": null, "band": null,
+              "content_score": null, "outcome_score": null,
+              "complaint_rate": 0, "hard_bounce_rate": 0,
+              "emails_sent": 0, "scored_recipients": 0,
+              "window_days": 30, "insufficient_outcome_data": true,
+              "guardrail_status": "throttled", "score_version": 1
+            }
+            """);
+
+        var res = await client.DeliverabilityRetrieveAsync();
+        Assert.True(res.Success);
+        var d = res.Content!;
+        Assert.Null(d.Score);
+        Assert.Null(d.Band);
+        Assert.Null(d.ContentScore);
+        Assert.Null(d.OutcomeScore);
+        Assert.True(d.InsufficientOutcomeData);
+        // guardrail_status is an open set; a future value stays a plain string.
+        Assert.Equal("throttled", d.GuardrailStatus);
     }
 
     // ---- errors ----------------------------------------------------------

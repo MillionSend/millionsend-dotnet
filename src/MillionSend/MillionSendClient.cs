@@ -20,7 +20,7 @@ namespace MillionSend;
 public sealed class MillionSendClient : IMillionSend
 {
     private const string DefaultBaseUrl = "http://localhost:3001";
-    private const string Version = "0.2.0";
+    private const string Version = "0.3.0";
 
     private static readonly JsonSerializerOptions Json = new()
     {
@@ -192,6 +192,9 @@ public sealed class MillionSendClient : IMillionSend
     public Task<MillionSendResponse<Email>> EmailRetrieveAsync(Guid id, CancellationToken cancellationToken = default)
         => SendAsync<Email>(HttpMethod.Get, $"/emails/{id}", cancellationToken: cancellationToken);
 
+    public Task<MillionSendResponse<EmailInsights>> EmailInsightsRetrieveAsync(Guid id, CancellationToken cancellationToken = default)
+        => SendAsync<EmailInsights>(HttpMethod.Get, $"/emails/{id}/insights", cancellationToken: cancellationToken);
+
     public Task<MillionSendResponse<CancelEmailResponse>> EmailCancelAsync(Guid id, CancellationToken cancellationToken = default)
         => SendAsync<CancelEmailResponse>(HttpMethod.Post, $"/emails/{id}/cancel", cancellationToken: cancellationToken);
 
@@ -271,4 +274,9 @@ public sealed class MillionSendClient : IMillionSend
 
     public Task<MillionSendResponse<RemoveSegmentResponse>> SegmentDeleteAsync(Guid id, CancellationToken cancellationToken = default)
         => SendAsync<RemoveSegmentResponse>(HttpMethod.Delete, $"/segments/{id}", cancellationToken: cancellationToken);
+
+    // ---- deliverability --------------------------------------------------
+
+    public Task<MillionSendResponse<Deliverability>> DeliverabilityRetrieveAsync(CancellationToken cancellationToken = default)
+        => SendAsync<Deliverability>(HttpMethod.Get, "/deliverability", cancellationToken: cancellationToken);
 }
