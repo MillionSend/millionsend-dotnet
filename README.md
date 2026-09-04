@@ -82,20 +82,59 @@ if (!res.Success && res.Exception!.ErrorName == "not_found")
 }
 ```
 
+## Clearing a field on update (`Optional<T>`)
+
+PATCH bodies distinguish "leave unchanged" (key omitted) from "clear" (JSON
+`null`). Fields that the API lets you clear are typed `Optional<T>?`: assign a
+plain value as usual, leave it unset (or assign C# `null`) to keep the current
+value, or assign `Optional<T>.Null` to send an explicit `null`.
+
+```csharp
+await client.ContactUpdateAsync(new ContactUpdateOptions
+{
+    Id = contactId,
+    FirstName = "Ada",                  // sets
+    LastName = Optional<string>.Null,   // clears
+});
+await client.BroadcastUpdateAsync(id, new BroadcastUpdateOptions { TopicId = Optional<Guid?>.Null });
+```
+
+Available on contact `FirstName`/`LastName`, broadcast `TopicId`, template
+`Subject`/`Text`/`Alias`, domain `TrackingSubdomain`, and contact-property
+`FallbackValue`. A `null` value inside `Properties` clears that key.
+
 ## Resources
 
 ### Emails
 
 ```csharp
 await client.EmailSendAsync(message, idempotencyKey: "unique-key"); // POST /emails
+await client.EmailSendAsync("unique-key", message);                 // same, resend-dotnet argument order
 await client.EmailRetrieveAsync(id);                                // GET /emails/{id}
-await client.EmailInsightsRetrieveAsync(id);                        // GET /emails/{id}/insights
+await client.EmailListAsync(new ListOptions { Limit = 50 });        // GET /emails
+await client.EmailUpdateAsync(id, "2026-09-01T09:00:00Z");          // PATCH /emails/{id} (reschedule)
 await client.EmailCancelAsync(id);                                  // POST /emails/{id}/cancel (scheduled only)
-await client.EmailBatchAsync(new[] { messageA, messageB }, idempotencyKey: "k"); // up to 100
+await client.EmailDeleteAsync(id);                                  // DELETE /emails/{id}
+await client.EmailInsightsRetrieveAsync(id);                        // GET /emails/{id}/insights
 ```
 
-`EmailSendAsync` and `EmailBatchAsync` accept an optional `idempotencyKey` — the
-only two endpoints that support the `Idempotency-Key` header.
+`EmailMessage` carries every wire field: `From`, `To`, `Subject`, `Html`, `Text`,
+`Cc`, `Bcc`, `ReplyTo`, `ScheduledAt`, `Tags`, `TopicId`, `Attachments`
+(`Filename`, base64 `Content`, `ContentType`, `ContentId`, `Path`), `Headers`, and
+`Template` (passed through; the server answers 422 until template sending ships).
+
+Batches take up to 100 messages. `BatchValidationMode.Permissive` sends the
+`x-batch-validation` header so valid items go out and invalid ones come back in
+`Errors` (the default, `Strict`, rejects the whole batch):
+
+```csharp
+var res = await client.EmailBatchAsync(new[] { a, b }, BatchValidationMode.Permissive, idempotencyKey: "k");
+foreach (var err in res.Content!.Errors ?? new())
+    Console.WriteLine($"item {err.Index}: {err.Message}");
+```
+
+`EmailSendAsync` and `EmailBatchAsync` are the only endpoints that accept the
+`Idempotency-Key` header.
 
 `EmailRetrieveAsync` includes a `Score` (0–10 best-practice score, `null` when
 the email has no insights). `EmailInsightsRetrieveAsync` returns the full
@@ -113,6 +152,8 @@ await client.ContactAddAsync(new ContactCreateOptions
     Email = "ada@acme.dev",
     FirstName = "Ada",
     Properties = new() { ["plan"] = "pro" },
+    Segments = new() { new SegmentRef { Id = segmentId } },
+    Topics = new() { new ContactTopicUpdate { Id = topicId, Subscription = TopicSubscription.OptIn } },
 });
 await client.ContactRetrieveAsync(new ContactAddress { Email = "ada@acme.dev" });
 await client.ContactRetrieveAsync(new ContactAddress { Id = contactId });   // by id or email (email wins)
@@ -126,9 +167,34 @@ await client.ContactTopicsUpdateAsync(new ContactTopicsUpdateOptions
     Email = "ada@acme.dev",
     Topics = new() { new ContactTopicUpdate { Id = topicId, Subscription = TopicSubscription.OptOut } },
 });
+
+// Segment membership
+await client.ContactAddToSegmentAsync(new ContactAddress { Id = contactId }, segmentId);      // POST /contacts/{id}/segments/{segmentId}
+await client.ContactRemoveFromSegmentAsync(new ContactAddress { Id = contactId }, segmentId); // DELETE …
+
+// Bulk import (MillionSend extension): up to 1000 items per call
+var batch = await client.ContactBatchAsync(contacts, new ContactBatchOptions
+{
+    OnConflict = ContactBatchOnConflict.Upsert,       // ?on_conflict=error|skip|upsert
+    Validation = BatchValidationMode.Permissive,      // x-batch-validation header
+});
+Console.WriteLine($"{batch.Content!.Counts.Created} created, {batch.Content.Counts.Failed} failed");
 ```
 
 A contact is addressable by id **or** email; when both are set, email wins.
+
+### Contact properties
+
+```csharp
+await client.ContactPropCreateAsync(new ContactPropertyCreateOptions
+{
+    Key = "plan", Type = ContactPropertyType.String, FallbackValue = "free",
+});
+await client.ContactPropListAsync();
+await client.ContactPropRetrieveAsync(id);
+await client.ContactPropUpdateAsync(id, new ContactPropertyUpdateOptions { FallbackValue = "trial" });
+await client.ContactPropDeleteAsync(id);
+```
 
 ### Topics
 
@@ -136,6 +202,7 @@ A contact is addressable by id **or** email; when both are set, email wins.
 await client.TopicAddAsync(new TopicCreateOptions { Name = "Product updates", DefaultSubscription = TopicSubscription.OptIn });
 await client.TopicRetrieveAsync(id);
 await client.TopicListAsync();     // unpaginated: bare { data }
+await client.TopicUpdateAsync(id, new TopicUpdateOptions { Name = "Product news" });
 await client.TopicDeleteAsync(id);
 ```
 
@@ -150,7 +217,10 @@ var broadcast = await client.BroadcastAddAsync(new BroadcastCreateOptions
     From = "Acme <news@acme.dev>",
     Subject = "Launch",
     Html = "<p>Hi {{{FIRST_NAME|there}}}</p>",
-    SegmentId = segmentId, // optional
+    PreviewText = "It's here",
+    SegmentId = segmentId,               // optional
+    Send = true,                          // send now instead of saving a draft
+    ScheduledAt = "2026-09-01T09:00:00Z", // requires Send = true
 });
 await client.BroadcastListAsync();
 await client.BroadcastRetrieveAsync(id);
@@ -178,7 +248,90 @@ await client.SegmentAddAsync(new SegmentCreateOptions
 await client.SegmentRetrieveAsync(id);   // includes a live contact_count
 await client.SegmentListAsync();
 await client.SegmentUpdateAsync(id, new SegmentUpdateOptions { Name = "Pro tier" });
+await client.SegmentContactListAsync(id, new ListOptions { Limit = 100 }); // GET /segments/{id}/contacts
 await client.SegmentDeleteAsync(id);
+```
+
+### Suppressions
+
+```csharp
+await client.SuppressionAddAsync("bounced@acme.dev", SuppressionOrigin.Manual);
+await client.SuppressionListAsync(new SuppressionListOptions { Limit = 50, Origin = SuppressionOrigin.Bounce });
+await client.SuppressionRetrieveAsync("bounced@acme.dev");   // by id or email
+await client.SuppressionRemoveAsync(id.ToString());
+await client.SuppressionBatchAddAsync(new[] { "a@acme.dev", "b@acme.dev" }, SuppressionOrigin.Unsubscribe);
+await client.SuppressionBatchRemoveAsync(new[] { "a@acme.dev" });   // by emails…
+await client.SuppressionBatchRemoveAsync(new[] { id1, id2 });        // …or by ids
+```
+
+### Domains
+
+```csharp
+var domain = await client.DomainAddAsync(new DomainCreateOptions
+{
+    Name = "acme.dev",
+    Region = "us-east-1",        // optional
+    CustomReturnPath = "send",   // optional
+    OpenTracking = true, ClickTracking = true, TrackingSubdomain = "track",
+});
+foreach (var r in domain.Content!.Records!)
+    Console.WriteLine($"{r.Type} {r.Name} {r.Value}");   // DNS records to publish
+
+await client.DomainListAsync();
+await client.DomainRetrieveAsync(id);
+await client.DomainVerifyAsync(id);
+await client.DomainUpdateAsync(id, new DomainUpdateOptions { ClickTracking = false });
+await client.DomainDeleteAsync(id);
+```
+
+### Webhooks
+
+```csharp
+var hook = await client.WebhookCreateAsync(new WebhookCreateOptions
+{
+    Endpoint = "https://acme.dev/hooks/millionsend",
+    Events = new() { "email.delivered", "email.bounced", "email.complained" },
+});
+Console.WriteLine(hook.Content!.SigningSecret);   // also returned by WebhookRetrieveAsync
+
+await client.WebhookListAsync();
+await client.WebhookRetrieveAsync(id);
+await client.WebhookUpdateAsync(id, new WebhookUpdateOptions { Status = WebhookStatus.Disabled });
+await client.WebhookDeleteAsync(id);
+```
+
+### API keys
+
+```csharp
+var key = await client.ApiKeyCreateAsync("ci", ApiKeyPermission.SendingAccess, domainId);
+Console.WriteLine(key.Content!.Token);   // shown once
+await client.ApiKeyListAsync();
+await client.ApiKeyDeleteAsync(key.Content.Id);
+```
+
+### Templates
+
+Addressed by id **or** alias. MillionSend templates have no draft/publish cycle:
+`TemplatePublishAsync` is a no-op kept for resend-dotnet compatibility.
+
+```csharp
+await client.TemplateCreateAsync(new TemplateCreateOptions
+{
+    Name = "Welcome", Alias = "welcome", Subject = "Hi {{{FIRST_NAME}}}", Html = "<p>…</p>",
+});
+await client.TemplateListAsync();
+await client.TemplateRetrieveAsync("welcome");
+await client.TemplateUpdateAsync("welcome", new TemplateUpdateOptions { Subject = "Welcome!" });
+await client.TemplateDuplicateAsync("welcome");
+await client.TemplatePublishAsync("welcome");
+await client.TemplateDeleteAsync("welcome");
+```
+
+### Usage (MillionSend extension)
+
+```csharp
+var usage = await client.UsageRetrieveAsync();   // GET /usage
+Console.WriteLine($"{usage.Content!.Today.EmailsSent}/{usage.Content.Limits.EmailsPerDay} today");
 ```
 
 ### Deliverability (MillionSend extension)
@@ -199,11 +352,18 @@ throws `ResendException`. MillionSend flattens the surface to
 `client.EmailSendAsync(...)` and returns a `MillionSendResponse<T>` (no throw).
 Method names and payload shapes otherwise line up. Notes:
 
-- **Domains and API keys** are managed in the MillionSend dashboard, not via the
-  API, so there are no domain/api-key methods here.
+- **Idempotency**: both argument orders work — `EmailSendAsync(message, idempotencyKey: k)`
+  and resend-dotnet's `EmailSendAsync(k, message)`; same for `EmailBatchAsync`.
+- **Batch validation**: `BatchValidationMode` is resend-dotnet's
+  `EmailBatchValidationMode`; it also drives `ContactBatchAsync`.
 - **No audiences**: contacts are team-global, one record per email address.
-  Resend's audience/segment grouping maps to MillionSend's dynamic **segments**
-  (saved filters) above.
+  The `/audiences/*` routes on the API are a compatibility shim and are not part
+  of this SDK; Resend's audience grouping maps to MillionSend's dynamic
+  **segments** (saved filters) above.
+- **Templates** exist but template-based *sending* does not yet: `EmailMessage.Template`
+  is put on the wire and the server answers 422.
+- **MillionSend extensions** (no Resend counterpart): segments, contact batch import,
+  usage, email insights, deliverability.
 
 ## Development
 

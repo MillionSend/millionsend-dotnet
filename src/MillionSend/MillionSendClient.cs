@@ -20,7 +20,7 @@ namespace MillionSend;
 public sealed class MillionSendClient : IMillionSend
 {
     private const string DefaultBaseUrl = "http://localhost:3001";
-    private const string Version = "0.3.0";
+    private const string Version = "0.4.0";
 
     private static readonly JsonSerializerOptions Json = new()
     {
@@ -83,6 +83,7 @@ public sealed class MillionSendClient : IMillionSend
         object? body = null,
         IReadOnlyDictionary<string, object?>? query = null,
         string? idempotencyKey = null,
+        BatchValidationMode? validation = null,
         CancellationToken cancellationToken = default)
     {
         using var request = new HttpRequestMessage(method, _baseUrl + path + QueryString(query));
@@ -100,6 +101,8 @@ public sealed class MillionSendClient : IMillionSend
             // into extra headers, so a bad key fails the call instead.
             if (idempotencyKey is not null && method == HttpMethod.Post)
                 request.Headers.Add("Idempotency-Key", idempotencyKey);
+            if (validation.HasValue)
+                request.Headers.Add("x-batch-validation", Wire(validation.Value));
             response = await _http.SendAsync(request, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex) when (!(ex is OperationCanceledException && cancellationToken.IsCancellationRequested))
@@ -130,6 +133,9 @@ public sealed class MillionSendClient : IMillionSend
         }
     }
 
+    /// <summary>Enum member as the API spells it (snake_case), for headers and query strings.</summary>
+    private static string Wire(Enum value) => JsonNamingPolicy.SnakeCaseLower.ConvertName(value.ToString());
+
     private static string QueryString(IReadOnlyDictionary<string, object?>? query)
     {
         if (query is null || query.Count == 0) return string.Empty;
@@ -137,7 +143,7 @@ public sealed class MillionSendClient : IMillionSend
         foreach (var kv in query)
         {
             if (kv.Value is null) continue;
-            var value = Convert.ToString(kv.Value, CultureInfo.InvariantCulture) ?? string.Empty;
+            var value = kv.Value is Enum e ? Wire(e) : Convert.ToString(kv.Value, CultureInfo.InvariantCulture) ?? string.Empty;
             parts.Add($"{Uri.EscapeDataString(kv.Key)}={Uri.EscapeDataString(value)}");
         }
         return parts.Count == 0 ? string.Empty : "?" + string.Join("&", parts);
@@ -174,14 +180,14 @@ public sealed class MillionSendClient : IMillionSend
     private static string ContactPath(Guid? id, string? email)
         => "/contacts/" + (!string.IsNullOrEmpty(email) ? Enc(email!) : (id?.ToString() ?? string.Empty));
 
-    private static IReadOnlyDictionary<string, object?>? ListQuery(ListOptions? options)
+    private static Dictionary<string, object?> ListQuery(ListOptions? options)
     {
-        if (options is null) return null;
         var query = new Dictionary<string, object?>();
+        if (options is null) return query;
         if (options.Limit.HasValue) query["limit"] = options.Limit.Value;
         if (options.After.HasValue) query["after"] = options.After.Value;
         if (options.Before.HasValue) query["before"] = options.Before.Value;
-        return query.Count == 0 ? null : query;
+        return query;
     }
 
     // ---- emails ----------------------------------------------------------
@@ -189,8 +195,20 @@ public sealed class MillionSendClient : IMillionSend
     public Task<MillionSendResponse<CreateEmailResponse>> EmailSendAsync(EmailMessage message, string? idempotencyKey = null, CancellationToken cancellationToken = default)
         => SendAsync<CreateEmailResponse>(HttpMethod.Post, "/emails", message, idempotencyKey: idempotencyKey, cancellationToken: cancellationToken);
 
+    public Task<MillionSendResponse<CreateEmailResponse>> EmailSendAsync(string idempotencyKey, EmailMessage message, CancellationToken cancellationToken = default)
+        => EmailSendAsync(message, idempotencyKey, cancellationToken);
+
     public Task<MillionSendResponse<Email>> EmailRetrieveAsync(Guid id, CancellationToken cancellationToken = default)
         => SendAsync<Email>(HttpMethod.Get, $"/emails/{id}", cancellationToken: cancellationToken);
+
+    public Task<MillionSendResponse<ListResponse<Email>>> EmailListAsync(ListOptions? options = null, CancellationToken cancellationToken = default)
+        => SendAsync<ListResponse<Email>>(HttpMethod.Get, "/emails", query: ListQuery(options), cancellationToken: cancellationToken);
+
+    public Task<MillionSendResponse<ObjectId>> EmailUpdateAsync(Guid id, string scheduledAt, CancellationToken cancellationToken = default)
+        => SendAsync<ObjectId>(HttpMethod.Patch, $"/emails/{id}", new { scheduledAt }, cancellationToken: cancellationToken);
+
+    public Task<MillionSendResponse<DeletedResponse>> EmailDeleteAsync(Guid id, CancellationToken cancellationToken = default)
+        => SendAsync<DeletedResponse>(HttpMethod.Delete, $"/emails/{id}", cancellationToken: cancellationToken);
 
     public Task<MillionSendResponse<EmailInsights>> EmailInsightsRetrieveAsync(Guid id, CancellationToken cancellationToken = default)
         => SendAsync<EmailInsights>(HttpMethod.Get, $"/emails/{id}/insights", cancellationToken: cancellationToken);
@@ -201,10 +219,26 @@ public sealed class MillionSendClient : IMillionSend
     public Task<MillionSendResponse<DataResponse<CreateEmailResponse>>> EmailBatchAsync(IEnumerable<EmailMessage> messages, string? idempotencyKey = null, CancellationToken cancellationToken = default)
         => SendAsync<DataResponse<CreateEmailResponse>>(HttpMethod.Post, "/emails/batch", messages.ToList(), idempotencyKey: idempotencyKey, cancellationToken: cancellationToken);
 
+    public Task<MillionSendResponse<DataResponse<CreateEmailResponse>>> EmailBatchAsync(string idempotencyKey, IEnumerable<EmailMessage> messages, CancellationToken cancellationToken = default)
+        => EmailBatchAsync(messages, idempotencyKey, cancellationToken);
+
+    public Task<MillionSendResponse<DataResponse<CreateEmailResponse>>> EmailBatchAsync(IEnumerable<EmailMessage> messages, BatchValidationMode validation, string? idempotencyKey = null, CancellationToken cancellationToken = default)
+        => SendAsync<DataResponse<CreateEmailResponse>>(HttpMethod.Post, "/emails/batch", messages.ToList(), idempotencyKey: idempotencyKey, validation: validation, cancellationToken: cancellationToken);
+
+    public Task<MillionSendResponse<DataResponse<CreateEmailResponse>>> EmailBatchAsync(string idempotencyKey, IEnumerable<EmailMessage> messages, BatchValidationMode validation, CancellationToken cancellationToken = default)
+        => EmailBatchAsync(messages, validation, idempotencyKey, cancellationToken);
+
     // ---- contacts (team-global) ------------------------------------------
 
     public Task<MillionSendResponse<ContactId>> ContactAddAsync(ContactCreateOptions options, CancellationToken cancellationToken = default)
         => SendAsync<ContactId>(HttpMethod.Post, "/contacts", options, cancellationToken: cancellationToken);
+
+    public Task<MillionSendResponse<ContactBatchResponse>> ContactBatchAsync(IEnumerable<ContactCreateOptions> contacts, ContactBatchOptions? options = null, CancellationToken cancellationToken = default)
+    {
+        var query = new Dictionary<string, object?>();
+        if (options?.OnConflict is { } onConflict) query["on_conflict"] = onConflict;
+        return SendAsync<ContactBatchResponse>(HttpMethod.Post, "/contacts/batch", contacts.ToList(), query, validation: options?.Validation, cancellationToken: cancellationToken);
+    }
 
     public Task<MillionSendResponse<Contact>> ContactRetrieveAsync(ContactAddress address, CancellationToken cancellationToken = default)
         => SendAsync<Contact>(HttpMethod.Get, ContactPath(address.Id, address.Email), cancellationToken: cancellationToken);
@@ -221,6 +255,29 @@ public sealed class MillionSendClient : IMillionSend
     public Task<MillionSendResponse<ContactId>> ContactTopicsUpdateAsync(ContactTopicsUpdateOptions options, CancellationToken cancellationToken = default)
         => SendAsync<ContactId>(HttpMethod.Patch, ContactPath(options.Id, options.Email) + "/topics", options.Topics, cancellationToken: cancellationToken);
 
+    public Task<MillionSendResponse<ObjectId>> ContactAddToSegmentAsync(ContactAddress address, Guid segmentId, CancellationToken cancellationToken = default)
+        => SendAsync<ObjectId>(HttpMethod.Post, ContactPath(address.Id, address.Email) + $"/segments/{segmentId}", cancellationToken: cancellationToken);
+
+    public Task<MillionSendResponse<DeletedResponse>> ContactRemoveFromSegmentAsync(ContactAddress address, Guid segmentId, CancellationToken cancellationToken = default)
+        => SendAsync<DeletedResponse>(HttpMethod.Delete, ContactPath(address.Id, address.Email) + $"/segments/{segmentId}", cancellationToken: cancellationToken);
+
+    // ---- contact properties ----------------------------------------------
+
+    public Task<MillionSendResponse<ContactProperty>> ContactPropCreateAsync(ContactPropertyCreateOptions options, CancellationToken cancellationToken = default)
+        => SendAsync<ContactProperty>(HttpMethod.Post, "/contact-properties", options, cancellationToken: cancellationToken);
+
+    public Task<MillionSendResponse<ListResponse<ContactProperty>>> ContactPropListAsync(ListOptions? options = null, CancellationToken cancellationToken = default)
+        => SendAsync<ListResponse<ContactProperty>>(HttpMethod.Get, "/contact-properties", query: ListQuery(options), cancellationToken: cancellationToken);
+
+    public Task<MillionSendResponse<ContactProperty>> ContactPropRetrieveAsync(Guid id, CancellationToken cancellationToken = default)
+        => SendAsync<ContactProperty>(HttpMethod.Get, $"/contact-properties/{id}", cancellationToken: cancellationToken);
+
+    public Task<MillionSendResponse<ObjectId>> ContactPropUpdateAsync(Guid id, ContactPropertyUpdateOptions options, CancellationToken cancellationToken = default)
+        => SendAsync<ObjectId>(HttpMethod.Patch, $"/contact-properties/{id}", options, cancellationToken: cancellationToken);
+
+    public Task<MillionSendResponse<DeletedResponse>> ContactPropDeleteAsync(Guid id, CancellationToken cancellationToken = default)
+        => SendAsync<DeletedResponse>(HttpMethod.Delete, $"/contact-properties/{id}", cancellationToken: cancellationToken);
+
     // ---- topics ----------------------------------------------------------
 
     public Task<MillionSendResponse<TopicId>> TopicAddAsync(TopicCreateOptions options, CancellationToken cancellationToken = default)
@@ -231,6 +288,9 @@ public sealed class MillionSendClient : IMillionSend
 
     public Task<MillionSendResponse<DataResponse<Topic>>> TopicListAsync(CancellationToken cancellationToken = default)
         => SendAsync<DataResponse<Topic>>(HttpMethod.Get, "/topics", cancellationToken: cancellationToken);
+
+    public Task<MillionSendResponse<TopicId>> TopicUpdateAsync(Guid id, TopicUpdateOptions options, CancellationToken cancellationToken = default)
+        => SendAsync<TopicId>(HttpMethod.Patch, $"/topics/{id}", options, cancellationToken: cancellationToken);
 
     public Task<MillionSendResponse<RemoveTopicResponse>> TopicDeleteAsync(Guid id, CancellationToken cancellationToken = default)
         => SendAsync<RemoveTopicResponse>(HttpMethod.Delete, $"/topics/{id}", cancellationToken: cancellationToken);
@@ -274,6 +334,112 @@ public sealed class MillionSendClient : IMillionSend
 
     public Task<MillionSendResponse<RemoveSegmentResponse>> SegmentDeleteAsync(Guid id, CancellationToken cancellationToken = default)
         => SendAsync<RemoveSegmentResponse>(HttpMethod.Delete, $"/segments/{id}", cancellationToken: cancellationToken);
+
+    public Task<MillionSendResponse<ListResponse<ContactListItem>>> SegmentContactListAsync(Guid id, ListOptions? options = null, CancellationToken cancellationToken = default)
+        => SendAsync<ListResponse<ContactListItem>>(HttpMethod.Get, $"/segments/{id}/contacts", query: ListQuery(options), cancellationToken: cancellationToken);
+
+    // ---- suppressions ----------------------------------------------------
+
+    public Task<MillionSendResponse<ObjectId>> SuppressionAddAsync(string email, SuppressionOrigin? origin = null, CancellationToken cancellationToken = default)
+        => SendAsync<ObjectId>(HttpMethod.Post, "/suppressions", new { email, origin }, cancellationToken: cancellationToken);
+
+    public Task<MillionSendResponse<ListResponse<Suppression>>> SuppressionListAsync(ListOptions? options = null, CancellationToken cancellationToken = default)
+    {
+        var query = ListQuery(options);
+        if (options is SuppressionListOptions { Origin: { } origin }) query["origin"] = origin;
+        return SendAsync<ListResponse<Suppression>>(HttpMethod.Get, "/suppressions", query: query, cancellationToken: cancellationToken);
+    }
+
+    public Task<MillionSendResponse<Suppression>> SuppressionRetrieveAsync(string idOrEmail, CancellationToken cancellationToken = default)
+        => SendAsync<Suppression>(HttpMethod.Get, "/suppressions/" + Enc(idOrEmail), cancellationToken: cancellationToken);
+
+    public Task<MillionSendResponse<DeletedResponse>> SuppressionRemoveAsync(string idOrEmail, CancellationToken cancellationToken = default)
+        => SendAsync<DeletedResponse>(HttpMethod.Delete, "/suppressions/" + Enc(idOrEmail), cancellationToken: cancellationToken);
+
+    public Task<MillionSendResponse<DataResponse<ObjectId>>> SuppressionBatchAddAsync(IEnumerable<string> emails, SuppressionOrigin? origin = null, CancellationToken cancellationToken = default)
+        => SendAsync<DataResponse<ObjectId>>(HttpMethod.Post, "/suppressions/batch/add", new { emails = emails.ToList(), origin }, cancellationToken: cancellationToken);
+
+    public Task<MillionSendResponse<DataResponse<DeletedResponse>>> SuppressionBatchRemoveAsync(IEnumerable<string> emails, CancellationToken cancellationToken = default)
+        => SendAsync<DataResponse<DeletedResponse>>(HttpMethod.Post, "/suppressions/batch/remove", new { emails = emails.ToList() }, cancellationToken: cancellationToken);
+
+    public Task<MillionSendResponse<DataResponse<DeletedResponse>>> SuppressionBatchRemoveAsync(IEnumerable<Guid> ids, CancellationToken cancellationToken = default)
+        => SendAsync<DataResponse<DeletedResponse>>(HttpMethod.Post, "/suppressions/batch/remove", new { ids = ids.ToList() }, cancellationToken: cancellationToken);
+
+    // ---- domains ---------------------------------------------------------
+
+    public Task<MillionSendResponse<Domain>> DomainAddAsync(DomainCreateOptions options, CancellationToken cancellationToken = default)
+        => SendAsync<Domain>(HttpMethod.Post, "/domains", options, cancellationToken: cancellationToken);
+
+    public Task<MillionSendResponse<ListResponse<Domain>>> DomainListAsync(ListOptions? options = null, CancellationToken cancellationToken = default)
+        => SendAsync<ListResponse<Domain>>(HttpMethod.Get, "/domains", query: ListQuery(options), cancellationToken: cancellationToken);
+
+    public Task<MillionSendResponse<Domain>> DomainRetrieveAsync(Guid id, CancellationToken cancellationToken = default)
+        => SendAsync<Domain>(HttpMethod.Get, $"/domains/{id}", cancellationToken: cancellationToken);
+
+    public Task<MillionSendResponse<Domain>> DomainVerifyAsync(Guid id, CancellationToken cancellationToken = default)
+        => SendAsync<Domain>(HttpMethod.Post, $"/domains/{id}/verify", cancellationToken: cancellationToken);
+
+    public Task<MillionSendResponse<Domain>> DomainUpdateAsync(Guid id, DomainUpdateOptions options, CancellationToken cancellationToken = default)
+        => SendAsync<Domain>(HttpMethod.Patch, $"/domains/{id}", options, cancellationToken: cancellationToken);
+
+    public Task<MillionSendResponse<DeletedResponse>> DomainDeleteAsync(Guid id, CancellationToken cancellationToken = default)
+        => SendAsync<DeletedResponse>(HttpMethod.Delete, $"/domains/{id}", cancellationToken: cancellationToken);
+
+    // ---- webhooks --------------------------------------------------------
+
+    public Task<MillionSendResponse<WebhookCreateResponse>> WebhookCreateAsync(WebhookCreateOptions options, CancellationToken cancellationToken = default)
+        => SendAsync<WebhookCreateResponse>(HttpMethod.Post, "/webhooks", options, cancellationToken: cancellationToken);
+
+    public Task<MillionSendResponse<ListResponse<Webhook>>> WebhookListAsync(ListOptions? options = null, CancellationToken cancellationToken = default)
+        => SendAsync<ListResponse<Webhook>>(HttpMethod.Get, "/webhooks", query: ListQuery(options), cancellationToken: cancellationToken);
+
+    public Task<MillionSendResponse<Webhook>> WebhookRetrieveAsync(Guid id, CancellationToken cancellationToken = default)
+        => SendAsync<Webhook>(HttpMethod.Get, $"/webhooks/{id}", cancellationToken: cancellationToken);
+
+    public Task<MillionSendResponse<ObjectId>> WebhookUpdateAsync(Guid id, WebhookUpdateOptions options, CancellationToken cancellationToken = default)
+        => SendAsync<ObjectId>(HttpMethod.Patch, $"/webhooks/{id}", options, cancellationToken: cancellationToken);
+
+    public Task<MillionSendResponse<DeletedResponse>> WebhookDeleteAsync(Guid id, CancellationToken cancellationToken = default)
+        => SendAsync<DeletedResponse>(HttpMethod.Delete, $"/webhooks/{id}", cancellationToken: cancellationToken);
+
+    // ---- api keys --------------------------------------------------------
+
+    public Task<MillionSendResponse<ApiKeyCreateResponse>> ApiKeyCreateAsync(string name, ApiKeyPermission? permission = null, Guid? domainId = null, CancellationToken cancellationToken = default)
+        => SendAsync<ApiKeyCreateResponse>(HttpMethod.Post, "/api-keys", new { name, permission, domainId }, cancellationToken: cancellationToken);
+
+    public Task<MillionSendResponse<ListResponse<ApiKey>>> ApiKeyListAsync(ListOptions? options = null, CancellationToken cancellationToken = default)
+        => SendAsync<ListResponse<ApiKey>>(HttpMethod.Get, "/api-keys", query: ListQuery(options), cancellationToken: cancellationToken);
+
+    public Task<MillionSendResponse<DeletedResponse>> ApiKeyDeleteAsync(Guid id, CancellationToken cancellationToken = default)
+        => SendAsync<DeletedResponse>(HttpMethod.Delete, $"/api-keys/{id}", cancellationToken: cancellationToken);
+
+    // ---- templates -------------------------------------------------------
+
+    public Task<MillionSendResponse<ObjectId>> TemplateCreateAsync(TemplateCreateOptions options, CancellationToken cancellationToken = default)
+        => SendAsync<ObjectId>(HttpMethod.Post, "/templates", options, cancellationToken: cancellationToken);
+
+    public Task<MillionSendResponse<ListResponse<Template>>> TemplateListAsync(ListOptions? options = null, CancellationToken cancellationToken = default)
+        => SendAsync<ListResponse<Template>>(HttpMethod.Get, "/templates", query: ListQuery(options), cancellationToken: cancellationToken);
+
+    public Task<MillionSendResponse<Template>> TemplateRetrieveAsync(string idOrAlias, CancellationToken cancellationToken = default)
+        => SendAsync<Template>(HttpMethod.Get, "/templates/" + Enc(idOrAlias), cancellationToken: cancellationToken);
+
+    public Task<MillionSendResponse<ObjectId>> TemplateUpdateAsync(string idOrAlias, TemplateUpdateOptions options, CancellationToken cancellationToken = default)
+        => SendAsync<ObjectId>(HttpMethod.Patch, "/templates/" + Enc(idOrAlias), options, cancellationToken: cancellationToken);
+
+    public Task<MillionSendResponse<DeletedResponse>> TemplateDeleteAsync(string idOrAlias, CancellationToken cancellationToken = default)
+        => SendAsync<DeletedResponse>(HttpMethod.Delete, "/templates/" + Enc(idOrAlias), cancellationToken: cancellationToken);
+
+    public Task<MillionSendResponse<ObjectId>> TemplatePublishAsync(string idOrAlias, CancellationToken cancellationToken = default)
+        => SendAsync<ObjectId>(HttpMethod.Post, "/templates/" + Enc(idOrAlias) + "/publish", cancellationToken: cancellationToken);
+
+    public Task<MillionSendResponse<ObjectId>> TemplateDuplicateAsync(string idOrAlias, CancellationToken cancellationToken = default)
+        => SendAsync<ObjectId>(HttpMethod.Post, "/templates/" + Enc(idOrAlias) + "/duplicate", cancellationToken: cancellationToken);
+
+    // ---- usage -----------------------------------------------------------
+
+    public Task<MillionSendResponse<Usage>> UsageRetrieveAsync(CancellationToken cancellationToken = default)
+        => SendAsync<Usage>(HttpMethod.Get, "/usage", cancellationToken: cancellationToken);
 
     // ---- deliverability --------------------------------------------------
 

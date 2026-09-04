@@ -24,7 +24,8 @@ internal sealed class RecordingHandler : HttpMessageHandler
         string? Body,
         string? Authorization,
         string? UserAgent,
-        string? IdempotencyKey);
+        string? IdempotencyKey,
+        string? BatchValidation);
 
     public List<Call> Calls { get; } = new();
     public HttpStatusCode Status { get; set; } = HttpStatusCode.OK;
@@ -40,6 +41,7 @@ internal sealed class RecordingHandler : HttpMessageHandler
         // UriEscaped keeps percent-encoding deterministic (e.g. "@" -> "%40").
         var path = "/" + uri.GetComponents(UriComponents.Path, UriFormat.UriEscaped);
         string? idem = request.Headers.TryGetValues("Idempotency-Key", out var v) ? string.Join(",", v) : null;
+        string? validation = request.Headers.TryGetValues("x-batch-validation", out var bv) ? string.Join(",", bv) : null;
 
         Calls.Add(new Call(
             request.Method.Method,
@@ -49,7 +51,8 @@ internal sealed class RecordingHandler : HttpMessageHandler
             body,
             request.Headers.Authorization?.ToString(),
             request.Headers.UserAgent?.ToString(),
-            idem));
+            idem,
+            validation));
 
         if (Throw is not null) throw Throw;
         return new HttpResponseMessage(Status)

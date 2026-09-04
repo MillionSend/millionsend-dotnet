@@ -9,7 +9,7 @@ using Xunit;
 
 namespace MillionSend.Tests;
 
-public class MillionSendClientTests
+public partial class MillionSendClientTests
 {
     private static readonly Guid C1 = Guid.Parse("cccccccc-cccc-cccc-cccc-cccccccccccc");
     private static readonly Guid B1 = Guid.Parse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
