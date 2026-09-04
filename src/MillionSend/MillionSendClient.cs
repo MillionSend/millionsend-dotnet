@@ -204,7 +204,7 @@ public sealed class MillionSendClient : IMillionSend
     public Task<MillionSendResponse<ListResponse<Email>>> EmailListAsync(ListOptions? options = null, CancellationToken cancellationToken = default)
         => SendAsync<ListResponse<Email>>(HttpMethod.Get, "/emails", query: ListQuery(options), cancellationToken: cancellationToken);
 
-    public Task<MillionSendResponse<ObjectId>> EmailUpdateAsync(Guid id, string scheduledAt, CancellationToken cancellationToken = default)
+    public Task<MillionSendResponse<ObjectId>> EmailRescheduleAsync(Guid id, string scheduledAt, CancellationToken cancellationToken = default)
         => SendAsync<ObjectId>(HttpMethod.Patch, $"/emails/{id}", new { scheduledAt }, cancellationToken: cancellationToken);
 
     public Task<MillionSendResponse<DeletedResponse>> EmailDeleteAsync(Guid id, CancellationToken cancellationToken = default)

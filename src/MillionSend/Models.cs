@@ -117,6 +117,7 @@ public enum SuppressionOrigin { Bounce, Complaint, Manual, Unsubscribe }
 public enum ApiKeyPermission { FullAccess, SendingAccess }
 public enum WebhookStatus { Enabled, Disabled }
 public enum ContactPropertyType { String, Number }
+public enum TopicVisibility { Private, Public }
 
 /// <summary><c>{ object, id }</c> acknowledgement returned by create/update actions.</summary>
 public sealed class ObjectId
@@ -437,14 +438,15 @@ public sealed class TopicCreateOptions
     public string Name { get; init; } = string.Empty;
     public string? Description { get; init; }
     public TopicSubscription DefaultSubscription { get; init; }
+    /// <summary>Public topics always appear on the unsubscribe page; private ones (the server default) only when reached through their own topic link.</summary>
+    public TopicVisibility? Visibility { get; init; }
 }
 
 public sealed class TopicUpdateOptions
 {
     public string? Name { get; init; }
     public string? Description { get; init; }
-    /// <summary><c>private</c> or <c>public</c>.</summary>
-    public string? Visibility { get; init; }
+    public TopicVisibility? Visibility { get; init; }
 }
 
 public sealed class Topic
@@ -453,6 +455,7 @@ public sealed class Topic
     public string? Name { get; init; }
     public string? Description { get; init; }
     public TopicSubscription DefaultSubscription { get; init; }
+    public TopicVisibility? Visibility { get; init; }
     public string? CreatedAt { get; init; }
 }
 

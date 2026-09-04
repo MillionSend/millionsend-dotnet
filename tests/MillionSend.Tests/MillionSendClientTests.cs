@@ -396,11 +396,13 @@ public partial class MillionSendClientTests
     {
         var (client, handler) = NewClient();
 
-        await client.TopicAddAsync(new TopicCreateOptions { Name = "Product", DefaultSubscription = TopicSubscription.OptIn });
+        await client.TopicAddAsync(new TopicCreateOptions
+        {
+            Name = "Product", Description = "Launches", DefaultSubscription = TopicSubscription.OptIn, Visibility = TopicVisibility.Public,
+        });
+        Assert.Equal("POST", handler.Last.Method);
         Assert.Equal("/topics", handler.Last.Path);
-        var body = handler.LastJson();
-        Assert.Equal("Product", body.GetProperty("name").GetString());
-        Assert.Equal("opt_in", body.GetProperty("default_subscription").GetString());
+        AssertJson("""{ "name": "Product", "description": "Launches", "default_subscription": "opt_in", "visibility": "public" }""", handler.Last.Body);
 
         await client.TopicRetrieveAsync(T1);
         Assert.Equal($"/topics/{T1}", handler.Last.Path);

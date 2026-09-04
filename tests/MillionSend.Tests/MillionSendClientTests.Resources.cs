@@ -122,7 +122,7 @@ public partial class MillionSendClientTests
     }
 
     [Fact]
-    public async Task Emails_list_update_delete()
+    public async Task Emails_list_reschedule_delete()
     {
         var (client, handler) = NewClient();
 
@@ -131,7 +131,7 @@ public partial class MillionSendClientTests
         Assert.Equal("/emails", handler.Last.Path);
         Assert.Equal($"?limit=5&after={E1}", handler.Last.Query);
 
-        await client.EmailUpdateAsync(E1, "2999-01-01T00:00:00Z");
+        await client.EmailRescheduleAsync(E1, "2999-01-01T00:00:00Z");
         Assert.Equal("PATCH", handler.Last.Method);
         Assert.Equal($"/emails/{E1}", handler.Last.Path);
         AssertJson("""{ "scheduled_at": "2999-01-01T00:00:00Z" }""", handler.Last.Body);
@@ -291,7 +291,7 @@ public partial class MillionSendClientTests
     {
         var (client, handler) = NewClient();
 
-        await client.TopicUpdateAsync(T1, new TopicUpdateOptions { Name = "Renamed", Visibility = "public" });
+        await client.TopicUpdateAsync(T1, new TopicUpdateOptions { Name = "Renamed", Visibility = TopicVisibility.Public });
         Assert.Equal("PATCH", handler.Last.Method);
         Assert.Equal($"/topics/{T1}", handler.Last.Path);
         AssertJson("""{ "name": "Renamed", "visibility": "public" }""", handler.Last.Body);
@@ -493,9 +493,13 @@ public partial class MillionSendClientTests
         Assert.Equal(WebhookStatus.Enabled, got.Content!.Status);
         Assert.Equal("whsec_1", got.Content.SigningSecret);
 
-        await client.WebhookUpdateAsync(W1, new WebhookUpdateOptions { Status = WebhookStatus.Disabled });
+        await client.WebhookUpdateAsync(W1, new WebhookUpdateOptions
+        {
+            Endpoint = "https://x.dev/hook2", Events = new() { "email.opened" }, Status = WebhookStatus.Disabled,
+        });
         Assert.Equal("PATCH", handler.Last.Method);
-        AssertJson("""{ "status": "disabled" }""", handler.Last.Body);
+        Assert.Equal($"/webhooks/{W1}", handler.Last.Path);
+        AssertJson("""{ "endpoint": "https://x.dev/hook2", "events": ["email.opened"], "status": "disabled" }""", handler.Last.Body);
 
         await client.WebhookDeleteAsync(W1);
         Assert.Equal("DELETE", handler.Last.Method);

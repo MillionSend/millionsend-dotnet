@@ -112,7 +112,7 @@ await client.EmailSendAsync(message, idempotencyKey: "unique-key"); // POST /ema
 await client.EmailSendAsync("unique-key", message);                 // same, resend-dotnet argument order
 await client.EmailRetrieveAsync(id);                                // GET /emails/{id}
 await client.EmailListAsync(new ListOptions { Limit = 50 });        // GET /emails
-await client.EmailUpdateAsync(id, "2026-09-01T09:00:00Z");          // PATCH /emails/{id} (reschedule)
+await client.EmailRescheduleAsync(id, "2026-09-01T09:00:00Z");      // PATCH /emails/{id}
 await client.EmailCancelAsync(id);                                  // POST /emails/{id}/cancel (scheduled only)
 await client.EmailDeleteAsync(id);                                  // DELETE /emails/{id}
 await client.EmailInsightsRetrieveAsync(id);                        // GET /emails/{id}/insights
@@ -199,7 +199,12 @@ await client.ContactPropDeleteAsync(id);
 ### Topics
 
 ```csharp
-await client.TopicAddAsync(new TopicCreateOptions { Name = "Product updates", DefaultSubscription = TopicSubscription.OptIn });
+await client.TopicAddAsync(new TopicCreateOptions
+{
+    Name = "Product updates",
+    DefaultSubscription = TopicSubscription.OptIn,
+    Visibility = TopicVisibility.Public,   // always shown on the unsubscribe page; default Private
+});
 await client.TopicRetrieveAsync(id);
 await client.TopicListAsync();     // unpaginated: bare { data }
 await client.TopicUpdateAsync(id, new TopicUpdateOptions { Name = "Product news" });
