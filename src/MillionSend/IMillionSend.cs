@@ -34,10 +34,16 @@ public interface IMillionSend
     Task<MillionSendResponse<Contact>> ContactRetrieveAsync(ContactAddress address, CancellationToken cancellationToken = default);
     Task<MillionSendResponse<ContactId>> ContactUpdateAsync(ContactUpdateOptions options, CancellationToken cancellationToken = default);
     Task<MillionSendResponse<RemoveContactResponse>> ContactDeleteAsync(ContactAddress address, CancellationToken cancellationToken = default);
+    /// <summary>Delete up to 1000 contacts by email (POST /contacts/batch/remove); lists only the rows actually deleted.</summary>
+    Task<MillionSendResponse<DataResponse<RemoveContactResponse>>> ContactBatchRemoveAsync(IEnumerable<string> emails, CancellationToken cancellationToken = default);
+    /// <summary>Delete up to 1000 contacts by id (POST /contacts/batch/remove); lists only the rows actually deleted.</summary>
+    Task<MillionSendResponse<DataResponse<RemoveContactResponse>>> ContactBatchRemoveAsync(IEnumerable<Guid> ids, CancellationToken cancellationToken = default);
     Task<MillionSendResponse<ListResponse<ContactListItem>>> ContactListAsync(ListOptions? options = null, CancellationToken cancellationToken = default);
     Task<MillionSendResponse<ContactId>> ContactTopicsUpdateAsync(ContactTopicsUpdateOptions options, CancellationToken cancellationToken = default);
     /// <summary>Every topic with the contact's effective subscription (GET /contacts/{id}/topics).</summary>
     Task<MillionSendResponse<ListResponse<ContactTopic>>> ContactListTopicsAsync(ContactAddress address, CancellationToken cancellationToken = default);
+    /// <summary>Mint the contact's hosted preference-page URL (POST /contacts/{id}/preferences-link). 422 when the instance cannot build hosted links.</summary>
+    Task<MillionSendResponse<ContactPreferencesLink>> ContactPreferencesLinkAsync(ContactAddress address, CancellationToken cancellationToken = default);
     Task<MillionSendResponse<ObjectId>> ContactAddToSegmentAsync(ContactAddress address, Guid segmentId, CancellationToken cancellationToken = default);
     Task<MillionSendResponse<DeletedResponse>> ContactRemoveFromSegmentAsync(ContactAddress address, Guid segmentId, CancellationToken cancellationToken = default);
 
@@ -96,6 +102,8 @@ public interface IMillionSend
     Task<MillionSendResponse<Webhook>> WebhookRetrieveAsync(Guid id, CancellationToken cancellationToken = default);
     Task<MillionSendResponse<ObjectId>> WebhookUpdateAsync(Guid id, WebhookUpdateOptions options, CancellationToken cancellationToken = default);
     Task<MillionSendResponse<DeletedResponse>> WebhookDeleteAsync(Guid id, CancellationToken cancellationToken = default);
+    /// <summary>Rotate the signing secret (POST /webhooks/{id}/rotate); the previous one keeps signing for the overlap window.</summary>
+    Task<MillionSendResponse<WebhookRotateResponse>> WebhookRotateAsync(Guid id, WebhookRotateOptions? options = null, CancellationToken cancellationToken = default);
 
     // API keys
     Task<MillionSendResponse<ApiKeyCreateResponse>> ApiKeyCreateAsync(string name, ApiKeyPermission? permission = null, Guid? domainId = null, CancellationToken cancellationToken = default);

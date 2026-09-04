@@ -244,6 +244,62 @@ public partial class MillionSendClientTests
         Assert.Equal("/contacts/" + Uri.EscapeDataString("c@x.dev") + $"/segments/{S1}", handler.Last.Path);
     }
 
+    [Fact]
+    public async Task Contacts_batch_remove_by_emails_or_ids()
+    {
+        var (client, handler) = NewClient(h => h.ResponseBody = $$"""
+            { "data": [{ "object": "contact", "contact": "{{C1}}", "deleted": true }] }
+            """);
+
+        var byEmail = await client.ContactBatchRemoveAsync(new[] { "a@x.dev", "b@x.dev" });
+        Assert.Equal("POST", handler.Last.Method);
+        Assert.Equal("/contacts/batch/remove", handler.Last.Path);
+        AssertJson("""{ "emails": ["a@x.dev", "b@x.dev"] }""", handler.Last.Body);
+        Assert.True(byEmail.Success);
+        var row = Assert.Single(byEmail.Content!.Data);
+        Assert.Equal("contact", row.Object);
+        Assert.Equal(C1.ToString(), row.Contact);
+        Assert.True(row.Deleted);
+
+        await client.ContactBatchRemoveAsync(new[] { C1, S1 });
+        Assert.Equal("/contacts/batch/remove", handler.Last.Path);
+        AssertJson($$"""{ "ids": ["{{C1}}", "{{S1}}"] }""", handler.Last.Body);
+    }
+
+    [Fact]
+    public async Task Contacts_preferences_link_by_email_or_id()
+    {
+        var (client, handler) = NewClient(h => h.ResponseBody = $$"""
+            { "object": "preferences_link", "contact": "{{C1}}", "url": "https://app.test/u/tok" }
+            """);
+
+        var res = await client.ContactPreferencesLinkAsync(new ContactAddress { Email = "c@x.dev" });
+        Assert.Equal("POST", handler.Last.Method);
+        Assert.Equal("/contacts/c%40x.dev/preferences-link", handler.Last.Path);
+        Assert.Null(handler.Last.Body);
+        Assert.True(res.Success);
+        Assert.Equal("preferences_link", res.Content!.Object);
+        Assert.Equal(C1, res.Content.Contact);
+        Assert.Equal("https://app.test/u/tok", res.Content.Url);
+
+        await client.ContactPreferencesLinkAsync(new ContactAddress { Id = C1 });
+        Assert.Equal($"/contacts/{C1}/preferences-link", handler.Last.Path);
+    }
+
+    [Fact]
+    public async Task Contacts_preferences_link_422_when_instance_cannot_mint()
+    {
+        var (client, _) = NewClient(h =>
+        {
+            h.Status = System.Net.HttpStatusCode.UnprocessableEntity;
+            h.ResponseBody = "{\"statusCode\":422,\"name\":\"validation_error\",\"message\":\"APP_BASE_URL and MASTER_ENCRYPTION_KEY must be set to mint preference links\"}";
+        });
+        var res = await client.ContactPreferencesLinkAsync(new ContactAddress { Id = C1 });
+        Assert.False(res.Success);
+        Assert.Equal(422, res.Exception!.StatusCode);
+        Assert.Equal("validation_error", res.Exception.ErrorName);
+    }
+
     // ---- contact properties ---------------------------------------------
 
     [Fact]
@@ -470,7 +526,8 @@ public partial class MillionSendClientTests
         var (client, handler) = NewClient(h => h.ResponseBody = $$"""
             { "object": "webhook", "id": "{{W1}}", "endpoint": "https://x.dev/hook",
               "created_at": "2026-01-01T00:00:00Z", "status": "enabled",
-              "events": ["email.delivered"], "signing_secret": "whsec_1" }
+              "events": ["email.delivered"], "signing_secret": "whsec_1",
+              "previous_secret_expires_at": "2026-01-02T00:00:00Z" }
             """);
 
         var created = await client.WebhookCreateAsync(new WebhookCreateOptions
@@ -492,6 +549,7 @@ public partial class MillionSendClientTests
         Assert.Equal($"/webhooks/{W1}", handler.Last.Path);
         Assert.Equal(WebhookStatus.Enabled, got.Content!.Status);
         Assert.Equal("whsec_1", got.Content.SigningSecret);
+        Assert.Equal("2026-01-02T00:00:00Z", got.Content.PreviousSecretExpiresAt);
 
         await client.WebhookUpdateAsync(W1, new WebhookUpdateOptions
         {
@@ -504,6 +562,34 @@ public partial class MillionSendClientTests
         await client.WebhookDeleteAsync(W1);
         Assert.Equal("DELETE", handler.Last.Method);
         Assert.Equal($"/webhooks/{W1}", handler.Last.Path);
+    }
+
+    [Fact]
+    public async Task Webhooks_rotate_sends_empty_body_or_options()
+    {
+        var (client, handler) = NewClient(h => h.ResponseBody = $$"""
+            { "object": "webhook", "id": "{{W1}}", "signing_secret": "whsec_2",
+              "previous_secret_expires_at": "2026-01-02T00:00:00Z" }
+            """);
+
+        var res = await client.WebhookRotateAsync(W1);
+        Assert.Equal("POST", handler.Last.Method);
+        Assert.Equal($"/webhooks/{W1}/rotate", handler.Last.Path);
+        AssertJson("{}", handler.Last.Body);
+        Assert.True(res.Success);
+        Assert.Equal(W1, res.Content!.Id);
+        Assert.Equal("whsec_2", res.Content.SigningSecret);
+        Assert.Equal("2026-01-02T00:00:00Z", res.Content.PreviousSecretExpiresAt);
+
+        await client.WebhookRotateAsync(W1, new WebhookRotateOptions { SigningSecret = "whsec_mine", OverlapHours = 0 });
+        AssertJson("""{ "signing_secret": "whsec_mine", "overlap_hours": 0 }""", handler.Last.Body);
+
+        await client.WebhookRotateAsync(W1, new WebhookRotateOptions { OverlapHours = 72 });
+        AssertJson("""{ "overlap_hours": 72 }""", handler.Last.Body);
+
+        handler.ResponseBody = $$"""{ "object": "webhook", "id": "{{W1}}", "signing_secret": "whsec_3", "previous_secret_expires_at": null }""";
+        var dropped = await client.WebhookRotateAsync(W1, new WebhookRotateOptions { OverlapHours = 0 });
+        Assert.Null(dropped.Content!.PreviousSecretExpiresAt);
     }
 
     // ---- api keys --------------------------------------------------------

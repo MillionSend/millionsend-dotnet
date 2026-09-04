@@ -433,8 +433,8 @@ public partial class MillionSendClientTests
         var (client, handler) = NewClient(h => h.ResponseBody = $$"""
             { "object": "list", "has_more": false,
               "data": [
-                { "id": "{{T1}}", "name": "Insights", "description": null, "subscription": "opt_in", "explicit": false },
-                { "id": "{{S1}}", "name": "Deals", "description": "Weekly offers", "subscription": "opt_out", "explicit": true }
+                { "id": "{{T1}}", "name": "Insights", "description": null, "subscription": "opt_in", "explicit": false, "visibility": "public" },
+                { "id": "{{S1}}", "name": "Deals", "description": "Weekly offers", "subscription": "opt_out", "explicit": true, "visibility": "private" }
               ] }
             """);
 
@@ -456,12 +456,14 @@ public partial class MillionSendClientTests
         Assert.Null(inherited.Description);
         Assert.Equal(TopicSubscription.OptIn, inherited.Subscription);
         Assert.False(inherited.Explicit);
+        Assert.Equal(TopicVisibility.Public, inherited.Visibility);
 
         var chosen = res.Content.Data[1];
         Assert.Equal(S1, chosen.Id);
         Assert.Equal("Weekly offers", chosen.Description);
         Assert.Equal(TopicSubscription.OptOut, chosen.Subscription);
         Assert.True(chosen.Explicit);
+        Assert.Equal(TopicVisibility.Private, chosen.Visibility);
 
         await client.ContactListTopicsAsync(new ContactAddress { Id = C1 });
         Assert.Equal($"/contacts/{C1}/topics", handler.Last.Path);

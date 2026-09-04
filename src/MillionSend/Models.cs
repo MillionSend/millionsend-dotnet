@@ -414,6 +414,17 @@ public sealed class ContactTopic
     public string? Description { get; init; }
     public TopicSubscription Subscription { get; init; }
     public bool Explicit { get; init; }
+    /// <summary>The hosted preference page lists public topics only.</summary>
+    public TopicVisibility? Visibility { get; init; }
+}
+
+/// <summary>A contact's hosted preference page. The URL is a signed, contact-scoped
+/// capability with no expiry: hand it only to the contact.</summary>
+public sealed class ContactPreferencesLink
+{
+    public string? Object { get; init; }
+    public Guid Contact { get; init; }
+    public string? Url { get; init; }
 }
 
 // ---- contact properties --------------------------------------------------
@@ -701,6 +712,24 @@ public sealed class WebhookCreateResponse
     public string? SigningSecret { get; init; }
 }
 
+/// <summary>Both fields optional: an empty body mints a secret with the server's default overlap.</summary>
+public sealed class WebhookRotateOptions
+{
+    /// <summary>Bring your own secret: <c>whsec_</c> followed by base64 of 24–64 bytes; minted when omitted.</summary>
+    public string? SigningSecret { get; init; }
+    /// <summary>0–72 hours the previous secret keeps signing alongside the new one; 0 drops it at once.</summary>
+    public int? OverlapHours { get; init; }
+}
+
+public sealed class WebhookRotateResponse
+{
+    public string? Object { get; init; }
+    public Guid Id { get; init; }
+    public string? SigningSecret { get; init; }
+    /// <summary>When the previous secret stops signing; null when it was dropped at once.</summary>
+    public string? PreviousSecretExpiresAt { get; init; }
+}
+
 public sealed class Webhook
 {
     public string? Object { get; init; }
@@ -711,6 +740,8 @@ public sealed class Webhook
     public List<string>? Events { get; init; }
     /// <summary>Returned by retrieve only; absent on list items.</summary>
     public string? SigningSecret { get; init; }
+    /// <summary>Retrieve only. While set, deliveries are also signed with the secret this one replaced (a rotation's overlap window).</summary>
+    public string? PreviousSecretExpiresAt { get; init; }
 }
 
 // ---- api keys ------------------------------------------------------------

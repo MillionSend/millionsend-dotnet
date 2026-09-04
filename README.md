@@ -190,9 +190,22 @@ var batch = await client.ContactBatchAsync(contacts, new ContactBatchOptions
     Validation = BatchValidationMode.Permissive,      // x-batch-validation header
 });
 Console.WriteLine($"{batch.Content!.Counts.Created} created, {batch.Content.Counts.Failed} failed");
+
+// Bulk delete (MillionSend extension): up to 1000 per call, by emails or by ids;
+// the response lists only the rows actually deleted              // POST /contacts/batch/remove
+await client.ContactBatchRemoveAsync(new[] { "a@acme.dev", "b@acme.dev" });
+await client.ContactBatchRemoveAsync(new[] { id1, id2 });
+
+// Preference-center link (MillionSend extension): the contact's hosted preferences
+// page, the same one their unsubscribe links open. No expiry — hand it only to the
+// contact. 422 when the instance cannot build hosted links.   // POST /contacts/{id}/preferences-link
+var link = await client.ContactPreferencesLinkAsync(new ContactAddress { Email = "ada@acme.dev" });
+Console.WriteLine(link.Content!.Url);
 ```
 
 A contact is addressable by id **or** email; when both are set, email wins.
+`ContactListTopicsAsync` items carry the topic's `Visibility`; the hosted preference
+page lists public topics only.
 
 ### Contact properties
 
@@ -314,7 +327,18 @@ await client.WebhookListAsync();
 await client.WebhookRetrieveAsync(id);
 await client.WebhookUpdateAsync(id, new WebhookUpdateOptions { Status = WebhookStatus.Disabled });
 await client.WebhookDeleteAsync(id);
+
+// Rotate the signing secret (MillionSend extension). For OverlapHours (0–72) every
+// delivery is signed with both secrets, so the receiver switches without a gap.
+var rotated = await client.WebhookRotateAsync(id, new WebhookRotateOptions { OverlapHours = 24 }); // POST /webhooks/{id}/rotate
+Console.WriteLine($"{rotated.Content!.SigningSecret} (old one signs until {rotated.Content.PreviousSecretExpiresAt})");
+await client.WebhookRotateAsync(id);   // mint a secret with the server's default overlap
 ```
+
+`WebhookRetrieveAsync` also reports `PreviousSecretExpiresAt` while a rotation's
+overlap window is open. Subscribable events are the `email.*` set plus
+`deliverability.*`, `quota.*`, `contact.created|updated|deleted|unsubscribed|resubscribed|topic_opt_in|topic_opt_out`
+and `suppression.added|removed`.
 
 ### API keys
 
@@ -381,8 +405,9 @@ Method names and payload shapes otherwise line up. Notes:
   **segments** (saved filters) above.
 - **Templates** exist but template-based *sending* does not yet: `EmailMessage.Template`
   is put on the wire and the server answers 422.
-- **MillionSend extensions** (no Resend counterpart): segments, contact batch import,
-  usage, email insights, deliverability.
+- **MillionSend extensions** (no Resend counterpart): segments, contact batch import
+  and batch remove, contact preference links, webhook secret rotation, usage, email
+  insights, deliverability.
 
 ## Development
 

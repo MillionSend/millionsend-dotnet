@@ -20,7 +20,7 @@ namespace MillionSend;
 public sealed class MillionSendClient : IMillionSend
 {
     private const string DefaultBaseUrl = "https://api.millionsend.com";
-    private const string Version = "0.5.0";
+    private const string Version = "0.6.0";
 
     private static readonly JsonSerializerOptions Json = new()
     {
@@ -249,6 +249,12 @@ public sealed class MillionSendClient : IMillionSend
     public Task<MillionSendResponse<RemoveContactResponse>> ContactDeleteAsync(ContactAddress address, CancellationToken cancellationToken = default)
         => SendAsync<RemoveContactResponse>(HttpMethod.Delete, ContactPath(address.Id, address.Email), cancellationToken: cancellationToken);
 
+    public Task<MillionSendResponse<DataResponse<RemoveContactResponse>>> ContactBatchRemoveAsync(IEnumerable<string> emails, CancellationToken cancellationToken = default)
+        => SendAsync<DataResponse<RemoveContactResponse>>(HttpMethod.Post, "/contacts/batch/remove", new { emails = emails.ToList() }, cancellationToken: cancellationToken);
+
+    public Task<MillionSendResponse<DataResponse<RemoveContactResponse>>> ContactBatchRemoveAsync(IEnumerable<Guid> ids, CancellationToken cancellationToken = default)
+        => SendAsync<DataResponse<RemoveContactResponse>>(HttpMethod.Post, "/contacts/batch/remove", new { ids = ids.ToList() }, cancellationToken: cancellationToken);
+
     public Task<MillionSendResponse<ListResponse<ContactListItem>>> ContactListAsync(ListOptions? options = null, CancellationToken cancellationToken = default)
         => SendAsync<ListResponse<ContactListItem>>(HttpMethod.Get, "/contacts", query: ListQuery(options), cancellationToken: cancellationToken);
 
@@ -257,6 +263,9 @@ public sealed class MillionSendClient : IMillionSend
 
     public Task<MillionSendResponse<ListResponse<ContactTopic>>> ContactListTopicsAsync(ContactAddress address, CancellationToken cancellationToken = default)
         => SendAsync<ListResponse<ContactTopic>>(HttpMethod.Get, ContactPath(address.Id, address.Email) + "/topics", cancellationToken: cancellationToken);
+
+    public Task<MillionSendResponse<ContactPreferencesLink>> ContactPreferencesLinkAsync(ContactAddress address, CancellationToken cancellationToken = default)
+        => SendAsync<ContactPreferencesLink>(HttpMethod.Post, ContactPath(address.Id, address.Email) + "/preferences-link", cancellationToken: cancellationToken);
 
     public Task<MillionSendResponse<ObjectId>> ContactAddToSegmentAsync(ContactAddress address, Guid segmentId, CancellationToken cancellationToken = default)
         => SendAsync<ObjectId>(HttpMethod.Post, ContactPath(address.Id, address.Email) + $"/segments/{segmentId}", cancellationToken: cancellationToken);
@@ -404,6 +413,9 @@ public sealed class MillionSendClient : IMillionSend
 
     public Task<MillionSendResponse<DeletedResponse>> WebhookDeleteAsync(Guid id, CancellationToken cancellationToken = default)
         => SendAsync<DeletedResponse>(HttpMethod.Delete, $"/webhooks/{id}", cancellationToken: cancellationToken);
+
+    public Task<MillionSendResponse<WebhookRotateResponse>> WebhookRotateAsync(Guid id, WebhookRotateOptions? options = null, CancellationToken cancellationToken = default)
+        => SendAsync<WebhookRotateResponse>(HttpMethod.Post, $"/webhooks/{id}/rotate", options ?? new WebhookRotateOptions(), cancellationToken: cancellationToken);
 
     // ---- api keys --------------------------------------------------------
 
