@@ -2,6 +2,8 @@ name: release
 
 on:
   workflow_dispatch:
+  push:
+    tags: ["v*"]
 
 permissions:
   contents: read
@@ -14,6 +16,11 @@ jobs:
       id-token: write # OIDC for NuGet Trusted Publishing
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # A tag publishes exactly the version the manifest declares; a tag that
+      # disagrees with it is refused instead of shipping the wrong number.
+      - name: Tag must match the manifest version
+        if: github.ref_type == 'tag'
+        run: test "v$(sed -n 's/.*<Version>\(.*\)<\/Version>/\1/p' src/MillionSend/MillionSend.csproj)" = "$GITHUB_REF_NAME"
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           dotnet-version: "9.0.x"
