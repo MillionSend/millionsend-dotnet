@@ -69,6 +69,44 @@ public partial class MillionSendClientTests
     }
 
     [Fact]
+    public async Task Default_base_url_is_millionsend_cloud()
+    {
+        var priorUrl = Environment.GetEnvironmentVariable("MILLIONSEND_BASE_URL");
+        Environment.SetEnvironmentVariable("MILLIONSEND_BASE_URL", null);
+        try
+        {
+            var handler = new RecordingHandler();
+            var client = new MillionSendClient(new MillionSendClientOptions { ApiToken = "ms_test" }, new HttpClient(handler));
+            await client.TopicRetrieveAsync(T1);
+            Assert.Equal($"https://api.millionsend.com/topics/{T1}", handler.Last.Url);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("MILLIONSEND_BASE_URL", priorUrl);
+        }
+    }
+
+    [Fact]
+    public async Task Explicit_base_url_wins_over_env_var()
+    {
+        var priorUrl = Environment.GetEnvironmentVariable("MILLIONSEND_BASE_URL");
+        Environment.SetEnvironmentVariable("MILLIONSEND_BASE_URL", "https://env.test");
+        try
+        {
+            var handler = new RecordingHandler();
+            var client = new MillionSendClient(
+                new MillionSendClientOptions { ApiToken = "ms_test", ApiUrl = "https://explicit.test" },
+                new HttpClient(handler));
+            await client.TopicRetrieveAsync(T1);
+            Assert.Equal($"https://explicit.test/topics/{T1}", handler.Last.Url);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("MILLIONSEND_BASE_URL", priorUrl);
+        }
+    }
+
+    [Fact]
     public void Refuses_non_loopback_http_unless_allowed()
     {
         var priorUrl = Environment.GetEnvironmentVariable("MILLIONSEND_BASE_URL");
@@ -389,6 +427,46 @@ public partial class MillionSendClientTests
         Assert.Equal("opt_out", body[0].GetProperty("subscription").GetString());
     }
 
+    [Fact]
+    public async Task Contacts_list_topics_by_email_decodes_effective_subscription()
+    {
+        var (client, handler) = NewClient(h => h.ResponseBody = $$"""
+            { "object": "list", "has_more": false,
+              "data": [
+                { "id": "{{T1}}", "name": "Insights", "description": null, "subscription": "opt_in", "explicit": false },
+                { "id": "{{S1}}", "name": "Deals", "description": "Weekly offers", "subscription": "opt_out", "explicit": true }
+              ] }
+            """);
+
+        var res = await client.ContactListTopicsAsync(new ContactAddress { Email = "c@x.dev" });
+
+        Assert.Equal("GET", handler.Last.Method);
+        Assert.Equal("/contacts/c%40x.dev/topics", handler.Last.Path);
+        Assert.Equal(string.Empty, handler.Last.Query);
+        Assert.Null(handler.Last.Body);
+
+        Assert.True(res.Success);
+        Assert.Equal("list", res.Content!.Object);
+        Assert.False(res.Content.HasMore);
+        Assert.Equal(2, res.Content.Data.Count);
+
+        var inherited = res.Content.Data[0];
+        Assert.Equal(T1, inherited.Id);
+        Assert.Equal("Insights", inherited.Name);
+        Assert.Null(inherited.Description);
+        Assert.Equal(TopicSubscription.OptIn, inherited.Subscription);
+        Assert.False(inherited.Explicit);
+
+        var chosen = res.Content.Data[1];
+        Assert.Equal(S1, chosen.Id);
+        Assert.Equal("Weekly offers", chosen.Description);
+        Assert.Equal(TopicSubscription.OptOut, chosen.Subscription);
+        Assert.True(chosen.Explicit);
+
+        await client.ContactListTopicsAsync(new ContactAddress { Id = C1 });
+        Assert.Equal($"/contacts/{C1}/topics", handler.Last.Path);
+    }
+
     // ---- topics ----------------------------------------------------------
 
     [Fact]
@@ -574,6 +652,23 @@ public partial class MillionSendClientTests
         Assert.Equal(422, res.Exception!.StatusCode);
         Assert.Equal("validation_error", res.Exception.ErrorName);
         Assert.Equal("bad input", res.Exception.Message);
+    }
+
+    [Fact]
+    public async Task AllRecipientsSuppressed_surfaces_its_error_name()
+    {
+        var (client, handler) = NewClient(h =>
+        {
+            h.Status = HttpStatusCode.UnprocessableEntity;
+            h.ResponseBody = "{\"statusCode\":422,\"name\":\"all_recipients_suppressed\",\"message\":\"All recipients are suppressed\"}";
+        });
+
+        var res = await client.EmailSendAsync(new EmailMessage { From = "a@x.dev", To = "b@x.dev", Subject = "s", TopicId = T1 });
+        Assert.Equal("/emails", handler.Last.Path);
+        Assert.False(res.Success);
+        Assert.Equal(422, res.Exception!.StatusCode);
+        Assert.Equal("all_recipients_suppressed", res.Exception.ErrorName);
+        Assert.Equal("All recipients are suppressed", res.Exception.Message);
     }
 
     [Fact]

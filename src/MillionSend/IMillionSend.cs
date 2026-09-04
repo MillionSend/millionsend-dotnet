@@ -36,6 +36,8 @@ public interface IMillionSend
     Task<MillionSendResponse<RemoveContactResponse>> ContactDeleteAsync(ContactAddress address, CancellationToken cancellationToken = default);
     Task<MillionSendResponse<ListResponse<ContactListItem>>> ContactListAsync(ListOptions? options = null, CancellationToken cancellationToken = default);
     Task<MillionSendResponse<ContactId>> ContactTopicsUpdateAsync(ContactTopicsUpdateOptions options, CancellationToken cancellationToken = default);
+    /// <summary>Every topic with the contact's effective subscription (GET /contacts/{id}/topics).</summary>
+    Task<MillionSendResponse<ListResponse<ContactTopic>>> ContactListTopicsAsync(ContactAddress address, CancellationToken cancellationToken = default);
     Task<MillionSendResponse<ObjectId>> ContactAddToSegmentAsync(ContactAddress address, Guid segmentId, CancellationToken cancellationToken = default);
     Task<MillionSendResponse<DeletedResponse>> ContactRemoveFromSegmentAsync(ContactAddress address, Guid segmentId, CancellationToken cancellationToken = default);
 

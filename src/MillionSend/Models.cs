@@ -404,6 +404,18 @@ public sealed class ContactTopicsUpdateOptions
     public List<ContactTopicUpdate> Topics { get; init; } = new();
 }
 
+/// <summary>A topic as one contact sees it. <see cref="Subscription"/> is the
+/// effective choice: the contact's own when <see cref="Explicit"/> is true,
+/// otherwise the topic's default.</summary>
+public sealed class ContactTopic
+{
+    public Guid Id { get; init; }
+    public string? Name { get; init; }
+    public string? Description { get; init; }
+    public TopicSubscription Subscription { get; init; }
+    public bool Explicit { get; init; }
+}
+
 // ---- contact properties --------------------------------------------------
 
 public sealed class ContactPropertyCreateOptions

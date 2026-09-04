@@ -4,7 +4,8 @@ Official .NET SDK for [MillionSend](https://github.com/MillionSend/millionsend) 
 self-hostable, [Resend](https://resend.com)-wire-compatible email API.
 
 The API is wire-compatible with Resend, so migrating is mostly swapping the
-package and pointing the client at your instance. Targets **net8.0**.
+package. MillionSend Cloud works with just an API key; a self-hosted instance
+sets its origin. Targets **net8.0**.
 
 ## Install
 
@@ -17,7 +18,8 @@ dotnet add package MillionSend
 ```csharp
 using MillionSend;
 
-var client = new MillionSendClient("ms_123", "https://mail.acme.dev");
+var client = new MillionSendClient("ms_123");                             // MillionSend Cloud
+// var client = new MillionSendClient("ms_123", "https://mail.acme.dev");   // self-hosted
 
 var res = await client.EmailSendAsync(new EmailMessage
 {
@@ -50,8 +52,8 @@ var client = new MillionSendClient(new MillionSendClientOptions
 
 - `ApiToken` falls back to the `MILLIONSEND_API_KEY` environment variable. Missing
   key → throws at construction.
-- `ApiUrl` falls back to `MILLIONSEND_BASE_URL`, then `http://localhost:3001`.
-  MillionSend is self-hosted, so **set this to your deployment in production.**
+- `ApiUrl` falls back to `MILLIONSEND_BASE_URL`, then `https://api.millionsend.com`
+  (MillionSend Cloud). **Self-hosting? Set this to your deployment's origin.**
 - Plain `http://` is only accepted for loopback hosts (`localhost`, `127.0.0.1`, `::1`);
   any other `http://` URL throws `ArgumentException` at construction, since the API key
   is sent as a bearer header. Set `AllowInsecureHttp = true` on the options to talk to a
@@ -69,7 +71,11 @@ No method throws for an API or transport error. Every call returns a
 - `Content` — the deserialized response body on success.
 - `Exception` — a `MillionSendException` on failure, carrying `StatusCode`
   (`int?`), `ErrorName` (the stable snake_case discriminant, e.g.
-  `validation_error`, `not_found`, `sending_paused`), and `Message`.
+  `validation_error`, `not_found`, `sending_paused`, `all_recipients_suppressed`),
+  and `Message`.
+
+`EmailSendAsync` and `EmailBatchAsync` answer 422 `all_recipients_suppressed` when
+every `To` recipient is on the suppression list or opted out of the send's `TopicId`.
 
 Transport and client-side failures (the request never reached the API) carry
 `StatusCode == null` and `ErrorName == "application_error"`.
@@ -167,6 +173,11 @@ await client.ContactTopicsUpdateAsync(new ContactTopicsUpdateOptions
     Email = "ada@acme.dev",
     Topics = new() { new ContactTopicUpdate { Id = topicId, Subscription = TopicSubscription.OptOut } },
 });
+// Every topic with the contact's effective subscription: their explicit choice,
+// else the topic default (Explicit == false)                                 // GET /contacts/{id}/topics
+var topics = await client.ContactListTopicsAsync(new ContactAddress { Email = "ada@acme.dev" });
+foreach (var t in topics.Content!.Data)
+    Console.WriteLine($"{t.Name}: {t.Subscription}{(t.Explicit ? "" : " (default)")}");
 
 // Segment membership
 await client.ContactAddToSegmentAsync(new ContactAddress { Id = contactId }, segmentId);      // POST /contacts/{id}/segments/{segmentId}
@@ -361,6 +372,9 @@ Method names and payload shapes otherwise line up. Notes:
   and resend-dotnet's `EmailSendAsync(k, message)`; same for `EmailBatchAsync`.
 - **Batch validation**: `BatchValidationMode` is resend-dotnet's
   `EmailBatchValidationMode`; it also drives `ContactBatchAsync`.
+- **Contact addressing**: methods that take a contact (`ContactRetrieveAsync`,
+  `ContactListTopicsAsync`, …) accept a `ContactAddress` with an id **or** an email
+  where resend-dotnet takes a `Guid`.
 - **No audiences**: contacts are team-global, one record per email address.
   The `/audiences/*` routes on the API are a compatibility shim and are not part
   of this SDK; Resend's audience grouping maps to MillionSend's dynamic

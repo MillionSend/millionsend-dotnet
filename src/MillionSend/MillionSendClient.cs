@@ -19,8 +19,8 @@ namespace MillionSend;
 /// </summary>
 public sealed class MillionSendClient : IMillionSend
 {
-    private const string DefaultBaseUrl = "http://localhost:3001";
-    private const string Version = "0.4.0";
+    private const string DefaultBaseUrl = "https://api.millionsend.com";
+    private const string Version = "0.5.0";
 
     private static readonly JsonSerializerOptions Json = new()
     {
@@ -254,6 +254,9 @@ public sealed class MillionSendClient : IMillionSend
 
     public Task<MillionSendResponse<ContactId>> ContactTopicsUpdateAsync(ContactTopicsUpdateOptions options, CancellationToken cancellationToken = default)
         => SendAsync<ContactId>(HttpMethod.Patch, ContactPath(options.Id, options.Email) + "/topics", options.Topics, cancellationToken: cancellationToken);
+
+    public Task<MillionSendResponse<ListResponse<ContactTopic>>> ContactListTopicsAsync(ContactAddress address, CancellationToken cancellationToken = default)
+        => SendAsync<ListResponse<ContactTopic>>(HttpMethod.Get, ContactPath(address.Id, address.Email) + "/topics", cancellationToken: cancellationToken);
 
     public Task<MillionSendResponse<ObjectId>> ContactAddToSegmentAsync(ContactAddress address, Guid segmentId, CancellationToken cancellationToken = default)
         => SendAsync<ObjectId>(HttpMethod.Post, ContactPath(address.Id, address.Email) + $"/segments/{segmentId}", cancellationToken: cancellationToken);

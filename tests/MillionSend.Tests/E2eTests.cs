@@ -9,7 +9,8 @@ namespace MillionSend.Tests;
 /// MILLIONSEND_E2E=1 — deliberately NOT on MILLIONSEND_API_KEY, which the SDK
 /// itself reads and a developer may have exported for other work; that would
 /// make plain `dotnet test` mutate a live instance. Requires the key (and
-/// MILLIONSEND_BASE_URL if not localhost:3001) as usual. Exercises the
+/// MILLIONSEND_BASE_URL for a self-hosted instance; the default is
+/// MillionSend Cloud) as usual. Exercises the
 /// contact lifecycle, which needs no verified sender domain.
 ///
 ///     MILLIONSEND_E2E=1 MILLIONSEND_API_KEY=ms_... \
