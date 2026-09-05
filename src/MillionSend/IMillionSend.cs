@@ -38,6 +38,9 @@ public interface IMillionSend
     Task<MillionSendResponse<DataResponse<RemoveContactResponse>>> ContactBatchRemoveAsync(IEnumerable<string> emails, CancellationToken cancellationToken = default);
     /// <summary>Delete up to 1000 contacts by id (POST /contacts/batch/remove); lists only the rows actually deleted.</summary>
     Task<MillionSendResponse<DataResponse<RemoveContactResponse>>> ContactBatchRemoveAsync(IEnumerable<Guid> ids, CancellationToken cancellationToken = default);
+    /// <summary>Read up to 1000 contacts by id or email in one request (POST /contacts/batch/get), in request order; entries that match no contact come back under <c>Missing</c>.</summary>
+    Task<MillionSendResponse<ContactBatchGetResponse>> ContactBatchGetAsync(IEnumerable<ContactAddress> addresses, ContactBatchGetOptions? options = null, CancellationToken cancellationToken = default);
+    /// <param name="options">Pass a <see cref="ContactListOptions"/> to attach properties and/or topics to every row.</param>
     Task<MillionSendResponse<ListResponse<ContactListItem>>> ContactListAsync(ListOptions? options = null, CancellationToken cancellationToken = default);
     Task<MillionSendResponse<ContactId>> ContactTopicsUpdateAsync(ContactTopicsUpdateOptions options, CancellationToken cancellationToken = default);
     /// <summary>Every topic with the contact's effective subscription (GET /contacts/{id}/topics).</summary>
@@ -76,6 +79,7 @@ public interface IMillionSend
     Task<MillionSendResponse<ListResponse<Segment>>> SegmentListAsync(ListOptions? options = null, CancellationToken cancellationToken = default);
     Task<MillionSendResponse<Segment>> SegmentUpdateAsync(Guid id, SegmentUpdateOptions options, CancellationToken cancellationToken = default);
     Task<MillionSendResponse<RemoveSegmentResponse>> SegmentDeleteAsync(Guid id, CancellationToken cancellationToken = default);
+    /// <param name="options">Pass a <see cref="ContactListOptions"/> to attach properties and/or topics to every row.</param>
     Task<MillionSendResponse<ListResponse<ContactListItem>>> SegmentContactListAsync(Guid id, ListOptions? options = null, CancellationToken cancellationToken = default);
 
     // Suppressions

@@ -20,7 +20,7 @@ namespace MillionSend;
 public sealed class MillionSendClient : IMillionSend
 {
     private const string DefaultBaseUrl = "https://api.millionsend.com";
-    private const string Version = "0.6.0";
+    private const string Version = "0.7.0";
 
     private static readonly JsonSerializerOptions Json = new()
     {
@@ -190,6 +190,14 @@ public sealed class MillionSendClient : IMillionSend
         return query;
     }
 
+    private static Dictionary<string, object?> ContactListQuery(ListOptions? options)
+    {
+        var query = ListQuery(options);
+        if (options is ContactListOptions { Include: { Count: > 0 } include })
+            query["include"] = string.Join(",", include.Select(i => Wire(i)));
+        return query;
+    }
+
     // ---- emails ----------------------------------------------------------
 
     public Task<MillionSendResponse<CreateEmailResponse>> EmailSendAsync(EmailMessage message, string? idempotencyKey = null, CancellationToken cancellationToken = default)
@@ -255,8 +263,16 @@ public sealed class MillionSendClient : IMillionSend
     public Task<MillionSendResponse<DataResponse<RemoveContactResponse>>> ContactBatchRemoveAsync(IEnumerable<Guid> ids, CancellationToken cancellationToken = default)
         => SendAsync<DataResponse<RemoveContactResponse>>(HttpMethod.Post, "/contacts/batch/remove", new { ids = ids.ToList() }, cancellationToken: cancellationToken);
 
+    public Task<MillionSendResponse<ContactBatchGetResponse>> ContactBatchGetAsync(IEnumerable<ContactAddress> addresses, ContactBatchGetOptions? options = null, CancellationToken cancellationToken = default)
+        => SendAsync<ContactBatchGetResponse>(HttpMethod.Post, "/contacts/batch/get", new
+        {
+            // The wire takes exactly one of id/email per entry; email wins, as in ContactPath.
+            contacts = addresses.Select(a => string.IsNullOrEmpty(a.Email) ? new ContactAddress { Id = a.Id } : new ContactAddress { Email = a.Email }).ToList(),
+            include = options?.Include,
+        }, cancellationToken: cancellationToken);
+
     public Task<MillionSendResponse<ListResponse<ContactListItem>>> ContactListAsync(ListOptions? options = null, CancellationToken cancellationToken = default)
-        => SendAsync<ListResponse<ContactListItem>>(HttpMethod.Get, "/contacts", query: ListQuery(options), cancellationToken: cancellationToken);
+        => SendAsync<ListResponse<ContactListItem>>(HttpMethod.Get, "/contacts", query: ContactListQuery(options), cancellationToken: cancellationToken);
 
     public Task<MillionSendResponse<ContactId>> ContactTopicsUpdateAsync(ContactTopicsUpdateOptions options, CancellationToken cancellationToken = default)
         => SendAsync<ContactId>(HttpMethod.Patch, ContactPath(options.Id, options.Email) + "/topics", options.Topics, cancellationToken: cancellationToken);
@@ -348,7 +364,7 @@ public sealed class MillionSendClient : IMillionSend
         => SendAsync<RemoveSegmentResponse>(HttpMethod.Delete, $"/segments/{id}", cancellationToken: cancellationToken);
 
     public Task<MillionSendResponse<ListResponse<ContactListItem>>> SegmentContactListAsync(Guid id, ListOptions? options = null, CancellationToken cancellationToken = default)
-        => SendAsync<ListResponse<ContactListItem>>(HttpMethod.Get, $"/segments/{id}/contacts", query: ListQuery(options), cancellationToken: cancellationToken);
+        => SendAsync<ListResponse<ContactListItem>>(HttpMethod.Get, $"/segments/{id}/contacts", query: ContactListQuery(options), cancellationToken: cancellationToken);
 
     // ---- suppressions ----------------------------------------------------
 

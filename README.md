@@ -166,6 +166,9 @@ await client.ContactRetrieveAsync(new ContactAddress { Id = contactId });   // b
 await client.ContactUpdateAsync(new ContactUpdateOptions { Id = contactId, Unsubscribed = true });
 await client.ContactDeleteAsync(new ContactAddress { Email = "ada@acme.dev" });
 await client.ContactListAsync(new ListOptions { Limit = 50 });
+// Bulk read (MillionSend extension): attach Properties and Topics to every row, so an
+// audience reads in one request per 100 contacts instead of one per contact   // ?include=properties,topics
+await client.ContactListAsync(new ContactListOptions { Limit = 100, Include = new() { ContactInclude.Properties, ContactInclude.Topics } });
 
 // Topic subscriptions (granular unsubscribe)
 await client.ContactTopicsUpdateAsync(new ContactTopicsUpdateOptions
@@ -190,6 +193,14 @@ var batch = await client.ContactBatchAsync(contacts, new ContactBatchOptions
     Validation = BatchValidationMode.Permissive,      // x-batch-validation header
 });
 Console.WriteLine($"{batch.Content!.Counts.Created} created, {batch.Content.Counts.Failed} failed");
+
+// Bulk lookup (MillionSend extension): up to 1000 contacts by id or email in one request,
+// in request order; unknown entries are listed, not errors — one request against the rate limit
+var found = await client.ContactBatchGetAsync(                                 // POST /contacts/batch/get
+    new[] { new ContactAddress { Id = contactId }, new ContactAddress { Email = "b@acme.dev" } },
+    new ContactBatchGetOptions { Include = new() { ContactInclude.Topics } });
+found.Content!.Data;      // the contacts found: Id, Email, …, plus Properties/Topics per Include
+found.Content.Missing;    // [{ Index, Id?, Email? }] — request entries that matched nobody
 
 // Bulk delete (MillionSend extension): up to 1000 per call, by emails or by ids;
 // the response lists only the rows actually deleted              // POST /contacts/batch/remove
@@ -278,6 +289,7 @@ await client.SegmentRetrieveAsync(id);   // includes a live contact_count
 await client.SegmentListAsync();
 await client.SegmentUpdateAsync(id, new SegmentUpdateOptions { Name = "Pro tier" });
 await client.SegmentContactListAsync(id, new ListOptions { Limit = 100 }); // GET /segments/{id}/contacts
+await client.SegmentContactListAsync(id, new ContactListOptions { Include = new() { ContactInclude.Properties } }); // ?include=properties
 await client.SegmentDeleteAsync(id);
 ```
 
@@ -405,9 +417,9 @@ Method names and payload shapes otherwise line up. Notes:
   **segments** (saved filters) above.
 - **Templates** exist but template-based *sending* does not yet: `EmailMessage.Template`
   is put on the wire and the server answers 422.
-- **MillionSend extensions** (no Resend counterpart): segments, contact batch import
-  and batch remove, contact preference links, webhook secret rotation, usage, email
-  insights, deliverability.
+- **MillionSend extensions** (no Resend counterpart): segments, contact batch import,
+  batch get and batch remove, `include=` on contact lists, contact preference links,
+  webhook secret rotation, usage, email insights, deliverability.
 
 ## Development
 

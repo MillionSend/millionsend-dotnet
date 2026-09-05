@@ -267,6 +267,74 @@ public partial class MillionSendClientTests
     }
 
     [Fact]
+    public async Task Contacts_list_include_joins_facets_and_types_them()
+    {
+        var (client, handler) = NewClient(h => h.ResponseBody = $$"""
+            { "object": "list", "has_more": false,
+              "data": [{
+                "id": "{{C1}}", "email": "a@x.dev", "first_name": "Ada", "last_name": null, "created_at": "2026-01-01T00:00:00Z", "unsubscribed": false,
+                "properties": { "plan": { "type": "string", "value": "pro" } },
+                "topics": [{ "id": "{{T1}}", "name": "Deals", "description": null, "subscription": "opt_out", "explicit": true, "visibility": "public" }]
+              }] }
+            """);
+
+        var res = await client.ContactListAsync(new ContactListOptions { Limit = 100, Include = new() { ContactInclude.Properties, ContactInclude.Topics } });
+        Assert.Equal("GET", handler.Last.Method);
+        Assert.Equal("/contacts", handler.Last.Path);
+        Assert.Equal("?limit=100&include=properties%2Ctopics", handler.Last.Query);
+
+        var row = Assert.Single(res.Content!.Data);
+        Assert.Equal("pro", ((JsonElement)row.Properties!["plan"]!).GetProperty("value").GetString());
+        var topic = Assert.Single(row.Topics!);
+        Assert.Equal(T1, topic.Id);
+        Assert.Equal(TopicSubscription.OptOut, topic.Subscription);
+        Assert.Equal(TopicVisibility.Public, topic.Visibility);
+
+        await client.SegmentContactListAsync(S1, new ContactListOptions { Include = new() { ContactInclude.Topics } });
+        Assert.Equal($"/segments/{S1}/contacts", handler.Last.Path);
+        Assert.Equal("?include=topics", handler.Last.Query);
+
+        await client.ContactListAsync(new ContactListOptions { Limit = 5, Include = new() });
+        Assert.Equal("?limit=5", handler.Last.Query);
+    }
+
+    [Fact]
+    public async Task Contacts_batch_get_posts_ids_and_emails_and_lists_missing()
+    {
+        var (client, handler) = NewClient(h => h.ResponseBody = $$"""
+            { "object": "list",
+              "data": [{ "object": "contact", "id": "{{C1}}", "email": "a@x.dev", "first_name": null, "last_name": null, "created_at": "2026-01-01T00:00:00Z", "unsubscribed": false, "topics": [] }],
+              "missing": [{ "index": 1, "email": "b@x.dev" }, { "index": 2, "id": "{{S1}}" }] }
+            """);
+
+        var res = await client.ContactBatchGetAsync(
+            new[] { new ContactAddress { Id = C1 }, new ContactAddress { Email = "b@x.dev" }, new ContactAddress { Id = S1, Email = "" } },
+            new ContactBatchGetOptions { Include = new() { ContactInclude.Properties, ContactInclude.Topics } });
+
+        Assert.Equal("POST", handler.Last.Method);
+        Assert.Equal("/contacts/batch/get", handler.Last.Path);
+        Assert.Equal(string.Empty, handler.Last.Query);
+        AssertJson($$"""{ "contacts": [{ "id": "{{C1}}" }, { "email": "b@x.dev" }, { "id": "{{S1}}" }], "include": ["properties", "topics"] }""", handler.Last.Body);
+
+        Assert.True(res.Success);
+        Assert.Equal("list", res.Content!.Object);
+        var found = Assert.Single(res.Content.Data);
+        Assert.Equal("contact", found.Object);
+        Assert.Equal(C1, found.Id);
+        Assert.Empty(found.Topics!);
+        Assert.Null(found.Properties);
+        Assert.Equal(2, res.Content.Missing.Count);
+        Assert.Equal(1, res.Content.Missing[0].Index);
+        Assert.Equal("b@x.dev", res.Content.Missing[0].Email);
+        Assert.Null(res.Content.Missing[0].Id);
+        Assert.Equal(S1, res.Content.Missing[1].Id);
+
+        // Email wins over id, as everywhere a ContactAddress is accepted; no include -> key omitted.
+        await client.ContactBatchGetAsync(new[] { new ContactAddress { Id = C1, Email = "a@x.dev" } });
+        AssertJson("""{ "contacts": [{ "email": "a@x.dev" }] }""", handler.Last.Body);
+    }
+
+    [Fact]
     public async Task Contacts_preferences_link_by_email_or_id()
     {
         var (client, handler) = NewClient(h => h.ResponseBody = $$"""

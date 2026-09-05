@@ -113,6 +113,8 @@ public enum SegmentMatch { All, Any }
 public enum BatchValidationMode { Strict, Permissive }
 
 public enum ContactBatchOnConflict { Error, Skip, Upsert }
+/// <summary>Facets a contact list row or batch read can carry (<c>include=properties,topics</c>).</summary>
+public enum ContactInclude { Properties, Topics }
 public enum SuppressionOrigin { Bounce, Complaint, Manual, Unsubscribe }
 public enum ApiKeyPermission { FullAccess, SendingAccess }
 public enum WebhookStatus { Enabled, Disabled }
@@ -308,6 +310,13 @@ public sealed class ContactAddress
     public string? Email { get; init; }
 }
 
+/// <summary>List options for <c>GET /contacts</c> and <c>GET /segments/{id}/contacts</c>.</summary>
+public sealed class ContactListOptions : ListOptions
+{
+    /// <summary>Attach <see cref="ContactListItem.Properties"/> and/or <see cref="ContactListItem.Topics"/> to every row.</summary>
+    public List<ContactInclude>? Include { get; init; }
+}
+
 public sealed class ContactUpdateOptions
 {
     [JsonIgnore] public Guid? Id { get; init; }
@@ -326,6 +335,13 @@ public sealed class ContactBatchOptions
     /// <summary>What to do with an email that already belongs to a contact (server default: error).</summary>
     public ContactBatchOnConflict? OnConflict { get; init; }
     public BatchValidationMode? Validation { get; init; }
+}
+
+/// <summary>Body options for <c>POST /contacts/batch/get</c>.</summary>
+public sealed class ContactBatchGetOptions
+{
+    /// <summary>Attach <see cref="ContactListItem.Properties"/> and/or <see cref="ContactListItem.Topics"/> to every contact.</summary>
+    public List<ContactInclude>? Include { get; init; }
 }
 
 public sealed class ContactBatchItem
@@ -374,7 +390,7 @@ public sealed class Contact
     public Dictionary<string, object?>? Properties { get; init; }
 }
 
-public sealed class ContactListItem
+public class ContactListItem
 {
     public Guid Id { get; init; }
     public string? Email { get; init; }
@@ -382,6 +398,33 @@ public sealed class ContactListItem
     public string? LastName { get; init; }
     public string? CreatedAt { get; init; }
     public bool Unsubscribed { get; init; }
+    /// <summary>Only with <see cref="ContactInclude.Properties"/>; the same typed map as <see cref="Contact.Properties"/>.</summary>
+    public Dictionary<string, object?>? Properties { get; init; }
+    /// <summary>Only with <see cref="ContactInclude.Topics"/>; the same rows as <c>ContactListTopicsAsync</c>.</summary>
+    public List<ContactTopic>? Topics { get; init; }
+}
+
+/// <summary>One contact as <c>ContactBatchGetAsync</c> returns it: the list row plus <c>object</c>.</summary>
+public sealed class ContactBatchGetItem : ContactListItem
+{
+    public string? Object { get; init; }
+}
+
+/// <summary>A batch-get request entry that matched no contact.</summary>
+public sealed class ContactBatchGetMissing
+{
+    /// <summary>Position of the entry in the request array.</summary>
+    public int Index { get; init; }
+    public Guid? Id { get; init; }
+    public string? Email { get; init; }
+}
+
+public sealed class ContactBatchGetResponse
+{
+    public string? Object { get; init; }
+    /// <summary>The contacts found, in request order.</summary>
+    public List<ContactBatchGetItem> Data { get; init; } = new();
+    public List<ContactBatchGetMissing> Missing { get; init; } = new();
 }
 
 public sealed class RemoveContactResponse
