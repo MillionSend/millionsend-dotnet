@@ -264,6 +264,11 @@ public partial class MillionSendClientTests
         await client.ContactBatchRemoveAsync(new[] { C1, S1 });
         Assert.Equal("/contacts/batch/remove", handler.Last.Path);
         AssertJson($$"""{ "ids": ["{{C1}}", "{{S1}}"] }""", handler.Last.Body);
+
+        await client.ContactBatchRemoveAsync(new[] { C1 }, new ContactDeleteOptions { Erase = true });
+        AssertJson($$"""{ "ids": ["{{C1}}"], "erase": true }""", handler.Last.Body);
+        await client.ContactBatchRemoveAsync(new[] { "a@x.dev" }, new ContactDeleteOptions { Erase = true });
+        AssertJson("""{ "emails": ["a@x.dev"], "erase": true }""", handler.Last.Body);
     }
 
     [Fact]

@@ -20,7 +20,7 @@ namespace MillionSend;
 public sealed class MillionSendClient : IMillionSend
 {
     private const string DefaultBaseUrl = "https://api.millionsend.com";
-    private const string Version = "0.7.0";
+    private const string Version = "0.8.0";
 
     private static readonly JsonSerializerOptions Json = new()
     {
@@ -254,14 +254,15 @@ public sealed class MillionSendClient : IMillionSend
     public Task<MillionSendResponse<ContactId>> ContactUpdateAsync(ContactUpdateOptions options, CancellationToken cancellationToken = default)
         => SendAsync<ContactId>(HttpMethod.Patch, ContactPath(options.Id, options.Email), options, cancellationToken: cancellationToken);
 
-    public Task<MillionSendResponse<RemoveContactResponse>> ContactDeleteAsync(ContactAddress address, CancellationToken cancellationToken = default)
-        => SendAsync<RemoveContactResponse>(HttpMethod.Delete, ContactPath(address.Id, address.Email), cancellationToken: cancellationToken);
+    public Task<MillionSendResponse<RemoveContactResponse>> ContactDeleteAsync(ContactAddress address, ContactDeleteOptions? options = null, CancellationToken cancellationToken = default)
+        => SendAsync<RemoveContactResponse>(HttpMethod.Delete, ContactPath(address.Id, address.Email),
+            query: options?.Erase is true ? new Dictionary<string, object?> { ["erase"] = "true" } : null, cancellationToken: cancellationToken);
 
-    public Task<MillionSendResponse<DataResponse<RemoveContactResponse>>> ContactBatchRemoveAsync(IEnumerable<string> emails, CancellationToken cancellationToken = default)
-        => SendAsync<DataResponse<RemoveContactResponse>>(HttpMethod.Post, "/contacts/batch/remove", new { emails = emails.ToList() }, cancellationToken: cancellationToken);
+    public Task<MillionSendResponse<DataResponse<RemoveContactResponse>>> ContactBatchRemoveAsync(IEnumerable<string> emails, ContactDeleteOptions? options = null, CancellationToken cancellationToken = default)
+        => SendAsync<DataResponse<RemoveContactResponse>>(HttpMethod.Post, "/contacts/batch/remove", new { emails = emails.ToList(), erase = options?.Erase }, cancellationToken: cancellationToken);
 
-    public Task<MillionSendResponse<DataResponse<RemoveContactResponse>>> ContactBatchRemoveAsync(IEnumerable<Guid> ids, CancellationToken cancellationToken = default)
-        => SendAsync<DataResponse<RemoveContactResponse>>(HttpMethod.Post, "/contacts/batch/remove", new { ids = ids.ToList() }, cancellationToken: cancellationToken);
+    public Task<MillionSendResponse<DataResponse<RemoveContactResponse>>> ContactBatchRemoveAsync(IEnumerable<Guid> ids, ContactDeleteOptions? options = null, CancellationToken cancellationToken = default)
+        => SendAsync<DataResponse<RemoveContactResponse>>(HttpMethod.Post, "/contacts/batch/remove", new { ids = ids.ToList(), erase = options?.Erase }, cancellationToken: cancellationToken);
 
     public Task<MillionSendResponse<ContactBatchGetResponse>> ContactBatchGetAsync(IEnumerable<ContactAddress> addresses, ContactBatchGetOptions? options = null, CancellationToken cancellationToken = default)
         => SendAsync<ContactBatchGetResponse>(HttpMethod.Post, "/contacts/batch/get", new

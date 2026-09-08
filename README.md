@@ -164,7 +164,10 @@ await client.ContactAddAsync(new ContactCreateOptions
 await client.ContactRetrieveAsync(new ContactAddress { Email = "ada@acme.dev" });
 await client.ContactRetrieveAsync(new ContactAddress { Id = contactId });   // by id or email (email wins)
 await client.ContactUpdateAsync(new ContactUpdateOptions { Id = contactId, Unsubscribed = true });
-await client.ContactDeleteAsync(new ContactAddress { Email = "ada@acme.dev" });
+await client.ContactDeleteAsync(new ContactAddress { Email = "ada@acme.dev" });   // their emails stay in the log
+// Erase (MillionSend extension): also scrub the address from email history, event
+// payloads and API logs — a GDPR/LGPD erasure                                   // ?erase=true
+await client.ContactDeleteAsync(new ContactAddress { Email = "ada@acme.dev" }, new ContactDeleteOptions { Erase = true });
 await client.ContactListAsync(new ListOptions { Limit = 50 });
 // Bulk read (MillionSend extension): attach Properties and Topics to every row, so an
 // audience reads in one request per 100 contacts instead of one per contact   // ?include=properties,topics
@@ -203,9 +206,10 @@ found.Content!.Data;      // the contacts found: Id, Email, …, plus Properties
 found.Content.Missing;    // [{ Index, Id?, Email? }] — request entries that matched nobody
 
 // Bulk delete (MillionSend extension): up to 1000 per call, by emails or by ids;
-// the response lists only the rows actually deleted              // POST /contacts/batch/remove
+// the response lists only the rows actually deleted. Their emails stay in the log;
+// Erase also scrubs each address, as on a single delete          // POST /contacts/batch/remove
 await client.ContactBatchRemoveAsync(new[] { "a@acme.dev", "b@acme.dev" });
-await client.ContactBatchRemoveAsync(new[] { id1, id2 });
+await client.ContactBatchRemoveAsync(new[] { id1, id2 }, new ContactDeleteOptions { Erase = true });
 
 // Preference-center link (MillionSend extension): the contact's hosted preferences
 // page, the same one their unsubscribe links open. No expiry — hand it only to the
@@ -418,8 +422,8 @@ Method names and payload shapes otherwise line up. Notes:
 - **Templates** exist but template-based *sending* does not yet: `EmailMessage.Template`
   is put on the wire and the server answers 422.
 - **MillionSend extensions** (no Resend counterpart): segments, contact batch import,
-  batch get and batch remove, `include=` on contact lists, contact preference links,
-  webhook secret rotation, usage, email insights, deliverability.
+  batch get and batch remove, `include=` on contact lists, `erase` on contact deletes,
+  contact preference links, webhook secret rotation, usage, email insights, deliverability.
 
 ## Development
 

@@ -310,6 +310,16 @@ public sealed class ContactAddress
     public string? Email { get; init; }
 }
 
+/// <summary>Options for <c>DELETE /contacts/{id}</c> and <c>POST /contacts/batch/remove</c>.</summary>
+public sealed class ContactDeleteOptions
+{
+    /// <summary>
+    /// A plain delete keeps the contact's emails in the send log. With <c>true</c> the address is also
+    /// scrubbed from email history, event payloads and API logs (a GDPR/LGPD erasure).
+    /// </summary>
+    public bool? Erase { get; init; }
+}
+
 /// <summary>List options for <c>GET /contacts</c> and <c>GET /segments/{id}/contacts</c>.</summary>
 public sealed class ContactListOptions : ListOptions
 {

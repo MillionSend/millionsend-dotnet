@@ -403,6 +403,11 @@ public partial class MillionSendClientTests
         await client.ContactDeleteAsync(new ContactAddress { Email = "c@x.dev" });
         Assert.Equal("DELETE", handler.Last.Method);
         Assert.Equal("/contacts/" + Uri.EscapeDataString("c@x.dev"), handler.Last.Path);
+        Assert.Equal(string.Empty, handler.Last.Query);
+
+        await client.ContactDeleteAsync(new ContactAddress { Id = C1 }, new ContactDeleteOptions { Erase = true });
+        Assert.Equal($"/contacts/{C1}", handler.Last.Path);
+        Assert.Equal("?erase=true", handler.Last.Query);
 
         await client.ContactListAsync(new ListOptions { After = C1 });
         Assert.Equal("/contacts", handler.Last.Path);
