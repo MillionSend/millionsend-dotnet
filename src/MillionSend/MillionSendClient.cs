@@ -114,6 +114,13 @@ public sealed class MillionSendClient : IMillionSend
         BatchValidationMode? validation,
         CancellationToken cancellationToken)
     {
+        // URL normalization resolves an empty, "." or ".." segment away, so an id
+        // such as ".." would send the request to another resource
+        // (DELETE /templates/.. would reach /).
+        if (path.Split('/').Skip(1).Any(s => s.Length == 0 || s == "." || s == ".."))
+            return MillionSendResponse<T>.Fail(new MillionSendException(
+                "An id in the request path is empty, \".\" or \"..\".", null, "validation_error"));
+
         using var request = new HttpRequestMessage(method, _baseUrl + path + QueryString(query));
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _apiKey);
         request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));

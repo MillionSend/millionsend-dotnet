@@ -61,8 +61,8 @@ public partial class MillionSendClientTests
     {
         var (client, handler) = NewClient(h => h.ResponseBody = $$"""
             { "object": "list", "has_more": false, "data": [{{ReceivedJson}}],
-              "held": [{ "id": "{{SE1}}", "inbox_id": "{{I1}}", "reason": "not_allowlisted",
-                         "created_at": "2026-10-12T10:00:01.000Z" }] }
+              "held": [{ "id": "{{SE1}}", "inbox_id": "{{I1}}", "reason": "quarantined",
+                         "quarantine_reason": "not_allowlisted", "created_at": "2026-10-12T10:00:01.000Z" }] }
             """);
 
         var res = await client.ReceivedEmailListAsync(new ReceivedEmailListOptions
@@ -80,7 +80,8 @@ public partial class MillionSendClientTests
         Assert.True(res.Success);
         var held = Assert.Single(res.Content!.Held!);
         Assert.Equal(SE1, held.Id);
-        Assert.Equal("not_allowlisted", held.Reason);
+        Assert.Equal("quarantined", held.Reason);
+        Assert.Equal("not_allowlisted", held.QuarantineReason);
         Assert.Equal("a_tier_from_a_newer_server", Assert.Single(res.Content.Data).Screening!.SenderTrust);
 
         handler.ResponseBody = """{ "object": "list", "has_more": false, "data": [] }""";

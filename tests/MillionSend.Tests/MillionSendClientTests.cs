@@ -695,6 +695,30 @@ public partial class MillionSendClientTests
     }
 
     [Fact]
+    public async Task Never_sends_a_path_an_empty_or_dot_id_would_redirect()
+    {
+        var (client, handler) = NewClient();
+
+        foreach (var res in new[]
+        {
+            await client.TemplateDeleteAsync(".."),
+            await client.TemplateDeleteAsync("."),
+            await client.TemplateDeleteAsync(""),
+        })
+        {
+            Assert.False(res.Success);
+            Assert.Null(res.Exception!.StatusCode);
+            Assert.Equal("validation_error", res.Exception.ErrorName);
+        }
+        var inbox = await client.InboxRetrieveAsync("..");
+        Assert.Equal("validation_error", inbox.Exception!.ErrorName);
+        Assert.Empty(handler.Calls);
+
+        await client.TemplateDeleteAsync("...");
+        Assert.Equal("/templates/...", handler.Last.Path);
+    }
+
+    [Fact]
     public async Task TransportError_has_null_status()
     {
         var (client, _) = NewClient(h => h.Throw = new HttpRequestException("connection refused"));

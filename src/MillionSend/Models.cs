@@ -1046,12 +1046,16 @@ public sealed class ReceivedEmail
     public bool? Read { get; init; }
 }
 
-/// <summary>A matching email a long-poll found held (quarantined or being screened): its id only.</summary>
+/// <summary>A matching email a long-poll found held (quarantined or being screened): its id and why only.</summary>
 public sealed class HeldEmail
 {
     public Guid Id { get; init; }
+    /// <summary>Null for a catch-all copy held for a virus.</summary>
     public Guid? InboxId { get; init; }
+    /// <summary><c>pending</c> (still being screened) or <c>quarantined</c>.</summary>
     public string? Reason { get; init; }
+    /// <summary>Why it was quarantined; null while pending.</summary>
+    public string? QuarantineReason { get; init; }
     public string? CreatedAt { get; init; }
 }
 
