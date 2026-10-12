@@ -91,6 +91,9 @@ public partial class MillionSendClientTests
 
         await client.ReceivedEmailListAsync(new ReceivedEmailListOptions { Unread = false });
         Assert.Equal("?unread=false", handler.Last.Query);
+
+        await client.ReceivedEmailListAsync(new ReceivedEmailListOptions { Quarantined = true });
+        Assert.Equal("?quarantined=true", handler.Last.Query);
     }
 
     [Fact]
@@ -525,10 +528,10 @@ public partial class MillionSendClientTests
               "spam_verdict": "gray", "virus_verdict": null }] }
             """);
 
-        var list = await client.InboxThreadEmailListAsync(I1, TH1, new ListOptions { After = R1 });
+        var list = await client.InboxThreadEmailListAsync(I1, TH1, new InboxThreadEmailListOptions { After = R1, IncludeQuarantined = true });
         Assert.Equal("GET", handler.Last.Method);
         Assert.Equal($"/inboxes/{I1}/threads/{TH1}/emails", handler.Last.Path);
-        Assert.Equal($"?after={R1}", handler.Last.Query);
+        Assert.Equal($"?after={R1}&include_quarantined=true", handler.Last.Query);
         var inbound = Assert.Single(list.Content!.Data);
         Assert.Equal("inbound", inbound.Direction);
         Assert.Equal("suspicious", inbound.Screening!.Verdict);
@@ -543,9 +546,12 @@ public partial class MillionSendClientTests
             """;
         var sentEmail = await client.InboxThreadEmailRetrieveAsync(I1, TH1, SE1);
         Assert.Equal($"/inboxes/{I1}/threads/{TH1}/emails/{SE1}", handler.Last.Path);
+        Assert.Equal(string.Empty, handler.Last.Query);
         Assert.True(sentEmail.Success, sentEmail.Exception?.Message);
         Assert.Equal("0", Assert.Single(sentEmail.Content!.Attachments!).Id);
         Assert.Equal("queued", sentEmail.Content.Status);
+        await client.InboxThreadEmailRetrieveAsync(I1, TH1, SE1, includeQuarantined: true);
+        Assert.Equal("?include_quarantined=true", handler.Last.Query);
 
         var reply = await client.InboxThreadEmailReplyAsync(I1, TH1, R1, new EmailReplyOptions
         {

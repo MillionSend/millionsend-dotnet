@@ -553,6 +553,7 @@ public sealed class MillionSendClient : IMillionSend
             query["subject_contains"] = options.SubjectContains;
             query["unread"] = options.Unread;
             if (options.IncludeQuarantined) query["include_quarantined"] = true;
+            if (options.Quarantined) query["quarantined"] = true;
         }
         return SendAsync<ReceivedEmailList>(HttpMethod.Get, "/emails/receiving", query: query, cancellationToken: cancellationToken);
     }
@@ -659,11 +660,16 @@ public sealed class MillionSendClient : IMillionSend
     public Task<MillionSendResponse<DeletedResponse>> InboxThreadDeleteAsync(Guid inboxId, Guid threadId, CancellationToken cancellationToken = default)
         => SendAsync<DeletedResponse>(HttpMethod.Delete, $"/inboxes/{inboxId}/threads/{threadId}", cancellationToken: cancellationToken);
 
-    public Task<MillionSendResponse<ListResponse<ThreadEmail>>> InboxThreadEmailListAsync(Guid inboxId, Guid threadId, ListOptions? options = null, CancellationToken cancellationToken = default)
-        => SendAsync<ListResponse<ThreadEmail>>(HttpMethod.Get, $"/inboxes/{inboxId}/threads/{threadId}/emails", query: ListQuery(options), cancellationToken: cancellationToken);
+    public Task<MillionSendResponse<ListResponse<ThreadEmail>>> InboxThreadEmailListAsync(Guid inboxId, Guid threadId, InboxThreadEmailListOptions? options = null, CancellationToken cancellationToken = default)
+    {
+        var query = ListQuery(options);
+        if (options?.IncludeQuarantined == true) query["include_quarantined"] = true;
+        return SendAsync<ListResponse<ThreadEmail>>(HttpMethod.Get, $"/inboxes/{inboxId}/threads/{threadId}/emails", query: query, cancellationToken: cancellationToken);
+    }
 
-    public Task<MillionSendResponse<ThreadEmail>> InboxThreadEmailRetrieveAsync(Guid inboxId, Guid threadId, Guid emailId, CancellationToken cancellationToken = default)
-        => SendAsync<ThreadEmail>(HttpMethod.Get, $"/inboxes/{inboxId}/threads/{threadId}/emails/{emailId}", cancellationToken: cancellationToken);
+    public Task<MillionSendResponse<ThreadEmail>> InboxThreadEmailRetrieveAsync(Guid inboxId, Guid threadId, Guid emailId, bool includeQuarantined = false, CancellationToken cancellationToken = default)
+        => SendAsync<ThreadEmail>(HttpMethod.Get, $"/inboxes/{inboxId}/threads/{threadId}/emails/{emailId}",
+            query: new Dictionary<string, object?> { ["include_quarantined"] = includeQuarantined ? true : null }, cancellationToken: cancellationToken);
 
     public Task<MillionSendResponse<InboxSendResult<ThreadEmail>>> InboxThreadEmailReplyAsync(Guid inboxId, Guid threadId, Guid emailId, EmailReplyOptions options, string? idempotencyKey = null, CancellationToken cancellationToken = default)
         => SendOrHoldAsync<ThreadEmail>($"/inboxes/{inboxId}/threads/{threadId}/emails/{emailId}/reply", options, idempotencyKey, cancellationToken);

@@ -934,6 +934,8 @@ public sealed class ReceivedEmailListOptions : ListOptions
     public bool? Unread { get; init; }
     /// <summary>Also list held mail; needs a full-access key that is not scoped to an inbox.</summary>
     public bool IncludeQuarantined { get; init; }
+    /// <summary>List held mail only; needs a full-access key that is not scoped to an inbox.</summary>
+    public bool Quarantined { get; init; }
 }
 
 /// <summary>An attachment of a received email. <see cref="DownloadUrl"/> is a signed
@@ -1358,6 +1360,12 @@ public sealed class InboxThreadUpdateOptions
     public string? Folder { get; init; }
     /// <summary>Applies this label to the thread.</summary>
     public Guid? LabelId { get; init; }
+}
+
+public sealed class InboxThreadEmailListOptions : ListOptions
+{
+    /// <summary>Also list held mail (owner views; a full-access key that is not scoped to an inbox).</summary>
+    public bool IncludeQuarantined { get; init; }
 }
 
 /// <summary>An attachment of a thread email. The id of an attachment the inbox sent is its position (<c>"0"</c>, <c>"1"</c>, …).</summary>

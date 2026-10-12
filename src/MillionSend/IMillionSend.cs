@@ -175,8 +175,9 @@ public interface IMillionSend
     /// <summary>Move the thread to trash, purged after 30 days; <c>Deleted</c> is false when it was already there.</summary>
     Task<MillionSendResponse<DeletedResponse>> InboxThreadDeleteAsync(Guid inboxId, Guid threadId, CancellationToken cancellationToken = default);
     /// <summary>Oldest first; <see cref="ListOptions.After"/> pages to newer emails.</summary>
-    Task<MillionSendResponse<ListResponse<ThreadEmail>>> InboxThreadEmailListAsync(Guid inboxId, Guid threadId, ListOptions? options = null, CancellationToken cancellationToken = default);
-    Task<MillionSendResponse<ThreadEmail>> InboxThreadEmailRetrieveAsync(Guid inboxId, Guid threadId, Guid emailId, CancellationToken cancellationToken = default);
+    Task<MillionSendResponse<ListResponse<ThreadEmail>>> InboxThreadEmailListAsync(Guid inboxId, Guid threadId, InboxThreadEmailListOptions? options = null, CancellationToken cancellationToken = default);
+    /// <param name="includeQuarantined">Also read a held email (owner views); otherwise it answers 403 <c>email_quarantined</c>.</param>
+    Task<MillionSendResponse<ThreadEmail>> InboxThreadEmailRetrieveAsync(Guid inboxId, Guid threadId, Guid emailId, bool includeQuarantined = false, CancellationToken cancellationToken = default);
     Task<MillionSendResponse<InboxSendResult<ThreadEmail>>> InboxThreadEmailReplyAsync(Guid inboxId, Guid threadId, Guid emailId, EmailReplyOptions options, string? idempotencyKey = null, CancellationToken cancellationToken = default);
     Task<MillionSendResponse<InboxSendResult<ThreadEmail>>> InboxThreadEmailForwardAsync(Guid inboxId, Guid threadId, Guid emailId, EmailForwardOptions options, string? idempotencyKey = null, CancellationToken cancellationToken = default);
     /// <summary>Unsent drafts, most recently updated first.</summary>

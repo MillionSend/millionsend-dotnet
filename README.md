@@ -344,7 +344,8 @@ await client.ReceivedEmailAttachmentRetrieveAsync(id, attachmentId);
 ```
 
 Held mail is invisible to inbox-scoped keys: a detail read answers 403
-`email_quarantined`. `IncludeQuarantined = true` lists it for full-access keys.
+`email_quarantined`. `IncludeQuarantined = true` lists it for full-access keys,
+`Quarantined = true` lists only held mail.
 `Wait` holds the request for up to 50 seconds, which the default `HttpClient`
 timeout (100 s) covers.
 
@@ -369,7 +370,7 @@ await client.InboxUpdateAsync(inboxId, new InboxUpdateOptions { ExpiresIn = Opti
 await client.InboxDeleteAsync(inboxId);
 
 // Verification codes and sign-in links (links are never fetched)
-var code = await client.InboxCodeLatestAsync(inboxId, new InboxCodeLatestOptions { From = "github.com", Wait = 30 });
+var code = await client.InboxCodeLatestAsync(inboxId, new InboxCodeLatestOptions { From = "example.com", Wait = 30 });
 if (code.Content!.Status == "found")
     Console.WriteLine(code.Content.Code ?? code.Content.Url);
 
@@ -391,7 +392,7 @@ await client.InboxThreadRetrieveAsync(inboxId, threadId);
 await client.InboxThreadUpdateAsync(inboxId, threadId, new InboxThreadUpdateOptions { Read = true, Folder = "archive" });
 await client.InboxThreadDeleteAsync(inboxId, threadId);            // to trash, purged after 30 days
 await client.InboxThreadEmailListAsync(inboxId, threadId);         // oldest first
-await client.InboxThreadEmailRetrieveAsync(inboxId, threadId, emailId);
+await client.InboxThreadEmailRetrieveAsync(inboxId, threadId, emailId);   // includeQuarantined: true reads held mail (owner views)
 await client.InboxThreadEmailReplyAsync(inboxId, threadId, emailId, new EmailReplyOptions { Text = "On it" });
 await client.InboxThreadEmailForwardAsync(inboxId, threadId, emailId, new EmailForwardOptions { To = "ops@acme.dev" });
 
@@ -472,12 +473,13 @@ overlap window is open. Subscribable events are the `email.*` set plus
 `deliverability.*`, `quota.*`, `contact.created|updated|deleted|unsubscribed|resubscribed|topic_opt_in|topic_opt_out`
 and `suppression.added|removed`.
 
-`email.received` and the inbox events (`inbox.created|updated|deleted|expired`,
+The inbox events (`inbox.created|updated|deleted|expired`,
 `inbox.thread.created|folder.updated|labels.updated`,
 `inbox.email.received|sent|quarantined`, `inbox.draft.created|updated|sent|deleted`)
 reach only endpoints that name them; an endpoint subscribed to all events skips
-them. `InboxIds` narrows them to some inboxes; `Optional<List<Guid>>.Null` on
-update removes the filter.
+them but still gets `email.received`. `InboxIds` narrows the inbox events and
+`email.received` to some inboxes; `Optional<List<Guid>>.Null` on update removes
+the filter.
 
 ### API keys
 
