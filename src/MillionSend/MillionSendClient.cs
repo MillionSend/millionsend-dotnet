@@ -20,7 +20,7 @@ namespace MillionSend;
 public sealed class MillionSendClient : IMillionSend
 {
     private const string DefaultBaseUrl = "https://api.millionsend.com";
-    private const string Version = "0.8.0";
+    private const string Version = "0.9.0";
 
     private static readonly JsonSerializerOptions Json = new()
     {
@@ -77,7 +77,7 @@ public sealed class MillionSendClient : IMillionSend
 
     // ---- HTTP core -------------------------------------------------------
 
-    private async Task<MillionSendResponse<T>> SendAsync<T>(
+    private Task<MillionSendResponse<T>> SendAsync<T>(
         HttpMethod method,
         string path,
         object? body = null,
@@ -85,6 +85,34 @@ public sealed class MillionSendClient : IMillionSend
         string? idempotencyKey = null,
         BatchValidationMode? validation = null,
         CancellationToken cancellationToken = default)
+        => SendCoreAsync(method, path, static (_, text) => JsonSerializer.Deserialize<T>(text, Json), body, query, idempotencyKey, validation, cancellationToken);
+
+    // The inbox send endpoints answer 202 with the draft their send rules held
+    // instead of the sent object, so the status picks the body's type.
+    private Task<MillionSendResponse<InboxSendResult<TSent>>> SendOrHoldAsync<TSent>(
+        string path, object? body, string? idempotencyKey, CancellationToken cancellationToken)
+        where TSent : class
+        => SendCoreAsync(
+            HttpMethod.Post,
+            path,
+            static (status, text) => status == 202
+                ? new InboxSendResult<TSent> { IsDraft = true, Draft = JsonSerializer.Deserialize<InboxDraft>(text, Json) }
+                : new InboxSendResult<TSent> { Sent = JsonSerializer.Deserialize<TSent>(text, Json) },
+            body,
+            null,
+            idempotencyKey,
+            null,
+            cancellationToken);
+
+    private async Task<MillionSendResponse<T>> SendCoreAsync<T>(
+        HttpMethod method,
+        string path,
+        Func<int, string, T?> read,
+        object? body,
+        IReadOnlyDictionary<string, object?>? query,
+        string? idempotencyKey,
+        BatchValidationMode? validation,
+        CancellationToken cancellationToken)
     {
         using var request = new HttpRequestMessage(method, _baseUrl + path + QueryString(query));
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _apiKey);
@@ -119,7 +147,7 @@ public sealed class MillionSendClient : IMillionSend
                 return MillionSendResponse<T>.Fail(ParseError((int)response.StatusCode, text));
             try
             {
-                var content = string.IsNullOrEmpty(text) ? default : JsonSerializer.Deserialize<T>(text, Json);
+                var content = string.IsNullOrEmpty(text) ? default : read((int)response.StatusCode, text);
                 return MillionSendResponse<T>.Ok(content);
             }
             catch (JsonException ex)
@@ -143,7 +171,12 @@ public sealed class MillionSendClient : IMillionSend
         foreach (var kv in query)
         {
             if (kv.Value is null) continue;
-            var value = kv.Value is Enum e ? Wire(e) : Convert.ToString(kv.Value, CultureInfo.InvariantCulture) ?? string.Empty;
+            var value = kv.Value switch
+            {
+                Enum e => Wire(e),
+                bool b => b ? "true" : "false",
+                _ => Convert.ToString(kv.Value, CultureInfo.InvariantCulture) ?? string.Empty,
+            };
             parts.Add($"{Uri.EscapeDataString(kv.Key)}={Uri.EscapeDataString(value)}");
         }
         return parts.Count == 0 ? string.Empty : "?" + string.Join("&", parts);
@@ -187,6 +220,23 @@ public sealed class MillionSendClient : IMillionSend
         if (options.Limit.HasValue) query["limit"] = options.Limit.Value;
         if (options.After.HasValue) query["after"] = options.After.Value;
         if (options.Before.HasValue) query["before"] = options.Before.Value;
+        return query;
+    }
+
+    private static string? Csv<T>(IEnumerable<T>? values)
+    {
+        var joined = values is null ? string.Empty : string.Join(",", values);
+        return joined.Length == 0 ? null : joined;
+    }
+
+    private static Dictionary<string, object?> ThreadQuery(InboxThreadListOptions? options)
+    {
+        var query = ListQuery(options);
+        if (options is null) return query;
+        query["folders"] = Csv(options.Folders);
+        query["labels"] = Csv(options.Labels);
+        query["read"] = options.Read;
+        if (options.IncludeQuarantined) query["include_quarantined"] = true;
         return query;
     }
 
@@ -437,7 +487,10 @@ public sealed class MillionSendClient : IMillionSend
     // ---- api keys --------------------------------------------------------
 
     public Task<MillionSendResponse<ApiKeyCreateResponse>> ApiKeyCreateAsync(string name, ApiKeyPermission? permission = null, Guid? domainId = null, CancellationToken cancellationToken = default)
-        => SendAsync<ApiKeyCreateResponse>(HttpMethod.Post, "/api-keys", new { name, permission, domainId }, cancellationToken: cancellationToken);
+        => ApiKeyCreateAsync(new ApiKeyCreateOptions { Name = name, Permission = permission, DomainId = domainId }, cancellationToken);
+
+    public Task<MillionSendResponse<ApiKeyCreateResponse>> ApiKeyCreateAsync(ApiKeyCreateOptions options, CancellationToken cancellationToken = default)
+        => SendAsync<ApiKeyCreateResponse>(HttpMethod.Post, "/api-keys", options, cancellationToken: cancellationToken);
 
     public Task<MillionSendResponse<ListResponse<ApiKey>>> ApiKeyListAsync(ListOptions? options = null, CancellationToken cancellationToken = default)
         => SendAsync<ListResponse<ApiKey>>(HttpMethod.Get, "/api-keys", query: ListQuery(options), cancellationToken: cancellationToken);
@@ -477,4 +530,158 @@ public sealed class MillionSendClient : IMillionSend
 
     public Task<MillionSendResponse<Deliverability>> DeliverabilityRetrieveAsync(CancellationToken cancellationToken = default)
         => SendAsync<Deliverability>(HttpMethod.Get, "/deliverability", cancellationToken: cancellationToken);
+
+    // ---- receiving -------------------------------------------------------
+
+    public Task<MillionSendResponse<ReceivedEmailList>> ReceivedEmailListAsync(ReceivedEmailListOptions? options = null, CancellationToken cancellationToken = default)
+    {
+        var query = ListQuery(options);
+        if (options is not null)
+        {
+            query["wait"] = options.Wait;
+            query["since"] = options.Since;
+            query["inbox_id"] = options.InboxId;
+            query["to"] = options.To;
+            query["from"] = options.From;
+            query["subject_contains"] = options.SubjectContains;
+            query["unread"] = options.Unread;
+            if (options.IncludeQuarantined) query["include_quarantined"] = true;
+        }
+        return SendAsync<ReceivedEmailList>(HttpMethod.Get, "/emails/receiving", query: query, cancellationToken: cancellationToken);
+    }
+
+    public Task<MillionSendResponse<ReceivedEmail>> ReceivedEmailRetrieveAsync(Guid id, string? htmlFormat = null, CancellationToken cancellationToken = default)
+        => SendAsync<ReceivedEmail>(HttpMethod.Get, $"/emails/receiving/{id}",
+            query: new Dictionary<string, object?> { ["html_format"] = htmlFormat }, cancellationToken: cancellationToken);
+
+    public Task<MillionSendResponse<InboxSendResult<ThreadEmail>>> ReceivedEmailReplyAsync(Guid id, EmailReplyOptions options, string? idempotencyKey = null, CancellationToken cancellationToken = default)
+        => SendOrHoldAsync<ThreadEmail>($"/emails/receiving/{id}/reply", options, idempotencyKey, cancellationToken);
+
+    public Task<MillionSendResponse<InboxSendResult<ThreadEmail>>> ReceivedEmailForwardAsync(Guid id, EmailForwardOptions options, string? idempotencyKey = null, CancellationToken cancellationToken = default)
+        => SendOrHoldAsync<ThreadEmail>($"/emails/receiving/{id}/forward", options, idempotencyKey, cancellationToken);
+
+    public Task<MillionSendResponse<DeletedResponse>> ReceivedEmailDeleteAsync(Guid id, CancellationToken cancellationToken = default)
+        => SendAsync<DeletedResponse>(HttpMethod.Delete, $"/emails/receiving/{id}", cancellationToken: cancellationToken);
+
+    public Task<MillionSendResponse<ListResponse<ReceivedAttachment>>> ReceivedEmailAttachmentListAsync(Guid emailId, ListOptions? options = null, CancellationToken cancellationToken = default)
+        => SendAsync<ListResponse<ReceivedAttachment>>(HttpMethod.Get, $"/emails/receiving/{emailId}/attachments", query: ListQuery(options), cancellationToken: cancellationToken);
+
+    public Task<MillionSendResponse<ReceivedAttachment>> ReceivedEmailAttachmentRetrieveAsync(Guid emailId, Guid id, CancellationToken cancellationToken = default)
+        => SendAsync<ReceivedAttachment>(HttpMethod.Get, $"/emails/receiving/{emailId}/attachments/{id}", cancellationToken: cancellationToken);
+
+    // ---- inboxes ---------------------------------------------------------
+
+    public Task<MillionSendResponse<Inbox>> InboxCreateAsync(InboxCreateOptions options, CancellationToken cancellationToken = default)
+        => SendAsync<Inbox>(HttpMethod.Post, "/inboxes", options, cancellationToken: cancellationToken);
+
+    public Task<MillionSendResponse<ListResponse<Inbox>>> InboxListAsync(InboxListOptions? options = null, CancellationToken cancellationToken = default)
+    {
+        var query = ListQuery(options);
+        query["kind"] = options?.Kind;
+        return SendAsync<ListResponse<Inbox>>(HttpMethod.Get, "/inboxes", query: query, cancellationToken: cancellationToken);
+    }
+
+    public Task<MillionSendResponse<Inbox>> InboxRetrieveAsync(string idOrEmail, CancellationToken cancellationToken = default)
+        => SendAsync<Inbox>(HttpMethod.Get, "/inboxes/" + Enc(idOrEmail), cancellationToken: cancellationToken);
+
+    public Task<MillionSendResponse<Inbox>> InboxUpdateAsync(Guid id, InboxUpdateOptions options, CancellationToken cancellationToken = default)
+        => SendAsync<Inbox>(HttpMethod.Patch, $"/inboxes/{id}", options, cancellationToken: cancellationToken);
+
+    public Task<MillionSendResponse<DeletedResponse>> InboxDeleteAsync(Guid id, CancellationToken cancellationToken = default)
+        => SendAsync<DeletedResponse>(HttpMethod.Delete, $"/inboxes/{id}", cancellationToken: cancellationToken);
+
+    public Task<MillionSendResponse<InboxSafety>> InboxSafetyRetrieveAsync(Guid inboxId, CancellationToken cancellationToken = default)
+        => SendAsync<InboxSafety>(HttpMethod.Get, $"/inboxes/{inboxId}/safety", cancellationToken: cancellationToken);
+
+    public Task<MillionSendResponse<InboxSafety>> InboxSafetyUpdateAsync(Guid inboxId, InboxSafetyOptions options, CancellationToken cancellationToken = default)
+        => SendAsync<InboxSafety>(HttpMethod.Patch, $"/inboxes/{inboxId}/safety", options, cancellationToken: cancellationToken);
+
+    public Task<MillionSendResponse<VerificationCode>> InboxCodeLatestAsync(Guid inboxId, InboxCodeLatestOptions? options = null, CancellationToken cancellationToken = default)
+        => SendAsync<VerificationCode>(HttpMethod.Get, $"/inboxes/{inboxId}/codes/latest", query: new Dictionary<string, object?>
+        {
+            ["from"] = options?.From,
+            ["wait"] = options?.Wait,
+            ["max_age"] = options?.MaxAge,
+        }, cancellationToken: cancellationToken);
+
+    public Task<MillionSendResponse<ListResponse<QuarantinedEmail>>> InboxQuarantineListAsync(Guid inboxId, ListOptions? options = null, CancellationToken cancellationToken = default)
+        => SendAsync<ListResponse<QuarantinedEmail>>(HttpMethod.Get, $"/inboxes/{inboxId}/quarantine", query: ListQuery(options), cancellationToken: cancellationToken);
+
+    public Task<MillionSendResponse<QuarantineRelease>> InboxQuarantineReleaseAsync(Guid inboxId, Guid emailId, bool trustSender = false, CancellationToken cancellationToken = default)
+        => SendAsync<QuarantineRelease>(HttpMethod.Post, $"/inboxes/{inboxId}/quarantine/{emailId}/release",
+            trustSender ? new { trustSender } : new object(), cancellationToken: cancellationToken);
+
+    public Task<MillionSendResponse<ListResponse<InboxLabel>>> InboxLabelListAsync(Guid inboxId, CancellationToken cancellationToken = default)
+        => SendAsync<ListResponse<InboxLabel>>(HttpMethod.Get, $"/inboxes/{inboxId}/labels", cancellationToken: cancellationToken);
+
+    public Task<MillionSendResponse<InboxLabel>> InboxLabelCreateAsync(Guid inboxId, InboxLabelOptions options, CancellationToken cancellationToken = default)
+        => SendAsync<InboxLabel>(HttpMethod.Post, $"/inboxes/{inboxId}/labels", options, cancellationToken: cancellationToken);
+
+    public Task<MillionSendResponse<InboxLabel>> InboxLabelUpdateAsync(Guid inboxId, Guid labelId, InboxLabelOptions options, CancellationToken cancellationToken = default)
+        => SendAsync<InboxLabel>(HttpMethod.Patch, $"/inboxes/{inboxId}/labels/{labelId}", options, cancellationToken: cancellationToken);
+
+    public Task<MillionSendResponse<DeletedResponse>> InboxLabelDeleteAsync(Guid inboxId, Guid labelId, CancellationToken cancellationToken = default)
+        => SendAsync<DeletedResponse>(HttpMethod.Delete, $"/inboxes/{inboxId}/labels/{labelId}", cancellationToken: cancellationToken);
+
+    public Task<MillionSendResponse<ListResponse<InboxThread>>> InboxThreadListAsync(Guid inboxId, InboxThreadListOptions? options = null, CancellationToken cancellationToken = default)
+        => SendAsync<ListResponse<InboxThread>>(HttpMethod.Get, $"/inboxes/{inboxId}/threads", query: ThreadQuery(options), cancellationToken: cancellationToken);
+
+    public Task<MillionSendResponse<ListResponse<InboxThread>>> InboxThreadSearchAsync(Guid inboxId, InboxThreadSearchOptions? options = null, CancellationToken cancellationToken = default)
+    {
+        var query = ThreadQuery(options);
+        if (options is not null)
+        {
+            query["query"] = options.Query;
+            query["from"] = Csv(options.From);
+            query["to"] = Csv(options.To);
+            query["cc"] = Csv(options.Cc);
+            query["bcc"] = Csv(options.Bcc);
+            query["has_attachment"] = options.HasAttachment;
+            query["start_date"] = options.StartDate;
+            query["end_date"] = options.EndDate;
+        }
+        return SendAsync<ListResponse<InboxThread>>(HttpMethod.Get, $"/inboxes/{inboxId}/threads/search", query: query, cancellationToken: cancellationToken);
+    }
+
+    public Task<MillionSendResponse<InboxThread>> InboxThreadRetrieveAsync(Guid inboxId, Guid threadId, CancellationToken cancellationToken = default)
+        => SendAsync<InboxThread>(HttpMethod.Get, $"/inboxes/{inboxId}/threads/{threadId}", cancellationToken: cancellationToken);
+
+    public Task<MillionSendResponse<InboxThread>> InboxThreadUpdateAsync(Guid inboxId, Guid threadId, InboxThreadUpdateOptions options, CancellationToken cancellationToken = default)
+        => SendAsync<InboxThread>(HttpMethod.Patch, $"/inboxes/{inboxId}/threads/{threadId}", options, cancellationToken: cancellationToken);
+
+    public Task<MillionSendResponse<DeletedResponse>> InboxThreadDeleteAsync(Guid inboxId, Guid threadId, CancellationToken cancellationToken = default)
+        => SendAsync<DeletedResponse>(HttpMethod.Delete, $"/inboxes/{inboxId}/threads/{threadId}", cancellationToken: cancellationToken);
+
+    public Task<MillionSendResponse<ListResponse<ThreadEmail>>> InboxThreadEmailListAsync(Guid inboxId, Guid threadId, ListOptions? options = null, CancellationToken cancellationToken = default)
+        => SendAsync<ListResponse<ThreadEmail>>(HttpMethod.Get, $"/inboxes/{inboxId}/threads/{threadId}/emails", query: ListQuery(options), cancellationToken: cancellationToken);
+
+    public Task<MillionSendResponse<ThreadEmail>> InboxThreadEmailRetrieveAsync(Guid inboxId, Guid threadId, Guid emailId, CancellationToken cancellationToken = default)
+        => SendAsync<ThreadEmail>(HttpMethod.Get, $"/inboxes/{inboxId}/threads/{threadId}/emails/{emailId}", cancellationToken: cancellationToken);
+
+    public Task<MillionSendResponse<InboxSendResult<ThreadEmail>>> InboxThreadEmailReplyAsync(Guid inboxId, Guid threadId, Guid emailId, EmailReplyOptions options, string? idempotencyKey = null, CancellationToken cancellationToken = default)
+        => SendOrHoldAsync<ThreadEmail>($"/inboxes/{inboxId}/threads/{threadId}/emails/{emailId}/reply", options, idempotencyKey, cancellationToken);
+
+    public Task<MillionSendResponse<InboxSendResult<ThreadEmail>>> InboxThreadEmailForwardAsync(Guid inboxId, Guid threadId, Guid emailId, EmailForwardOptions options, string? idempotencyKey = null, CancellationToken cancellationToken = default)
+        => SendOrHoldAsync<ThreadEmail>($"/inboxes/{inboxId}/threads/{threadId}/emails/{emailId}/forward", options, idempotencyKey, cancellationToken);
+
+    public Task<MillionSendResponse<ListResponse<InboxDraft>>> InboxDraftListAsync(Guid inboxId, ListOptions? options = null, CancellationToken cancellationToken = default)
+        => SendAsync<ListResponse<InboxDraft>>(HttpMethod.Get, $"/inboxes/{inboxId}/drafts", query: ListQuery(options), cancellationToken: cancellationToken);
+
+    public Task<MillionSendResponse<InboxDraft>> InboxDraftCreateAsync(Guid inboxId, InboxDraftCreateOptions options, CancellationToken cancellationToken = default)
+        => SendAsync<InboxDraft>(HttpMethod.Post, $"/inboxes/{inboxId}/drafts", options, cancellationToken: cancellationToken);
+
+    public Task<MillionSendResponse<InboxDraft>> InboxDraftRetrieveAsync(Guid inboxId, Guid draftId, CancellationToken cancellationToken = default)
+        => SendAsync<InboxDraft>(HttpMethod.Get, $"/inboxes/{inboxId}/drafts/{draftId}", cancellationToken: cancellationToken);
+
+    public Task<MillionSendResponse<InboxDraft>> InboxDraftUpdateAsync(Guid inboxId, Guid draftId, InboxDraftUpdateOptions options, CancellationToken cancellationToken = default)
+        => SendAsync<InboxDraft>(HttpMethod.Patch, $"/inboxes/{inboxId}/drafts/{draftId}", options, cancellationToken: cancellationToken);
+
+    public Task<MillionSendResponse<DeletedResponse>> InboxDraftDeleteAsync(Guid inboxId, Guid draftId, CancellationToken cancellationToken = default)
+        => SendAsync<DeletedResponse>(HttpMethod.Delete, $"/inboxes/{inboxId}/drafts/{draftId}", cancellationToken: cancellationToken);
+
+    public Task<MillionSendResponse<InboxSendResult<InboxDraft>>> InboxDraftSendAsync(Guid inboxId, Guid draftId, string? idempotencyKey = null, CancellationToken cancellationToken = default)
+        => SendOrHoldAsync<InboxDraft>($"/inboxes/{inboxId}/drafts/{draftId}/send", null, idempotencyKey, cancellationToken);
+
+    public Task<MillionSendResponse<InboxDraft>> InboxDraftRejectAsync(Guid inboxId, Guid draftId, CancellationToken cancellationToken = default)
+        => SendAsync<InboxDraft>(HttpMethod.Post, $"/inboxes/{inboxId}/drafts/{draftId}/reject", cancellationToken: cancellationToken);
 }

@@ -106,8 +106,10 @@ await client.BroadcastUpdateAsync(id, new BroadcastUpdateOptions { TopicId = Opt
 ```
 
 Available on contact `FirstName`/`LastName`, broadcast `TopicId`, template
-`Subject`/`Text`/`Alias`, domain `TrackingSubdomain`, and contact-property
-`FallbackValue`. A `null` value inside `Properties` clears that key.
+`Subject`/`Text`/`Alias`, domain `TrackingSubdomain`, contact-property
+`FallbackValue`, inbox `ExpiresIn`, safety `SendCap`, draft
+`To`/`Cc`/`Bcc`/`Subject`/`Html`/`Text` and webhook `InboxIds`. A `null`
+value inside `Properties` clears that key.
 
 ## Resources
 
@@ -309,6 +311,116 @@ await client.SuppressionBatchRemoveAsync(new[] { "a@acme.dev" });   // by emails
 await client.SuppressionBatchRemoveAsync(new[] { id1, id2 });        // …or by ids
 ```
 
+### Receiving
+
+Mail received at your receiving domains and inboxes. Everything in a received
+email was written by its sender, so show its HTML only in a sandbox.
+
+```csharp
+var page = await client.ReceivedEmailListAsync(new ReceivedEmailListOptions
+{
+    InboxId = inboxId, From = "acme.dev", SubjectContains = "code", Limit = 20,   // newest first
+});
+var email = await client.ReceivedEmailRetrieveAsync(id);          // htmlFormat: "cid" keeps cid: references
+Console.WriteLine(email.Content!.ExtractedText);                  // the reply without quotes, signature or hidden text
+Console.WriteLine(email.Content.Screening?.SenderTrust);          // owner, allowlisted, known_thread, external, …
+Console.WriteLine(email.Content.Extracted?.Code);                 // a verification code, when one was found
+
+// Long-poll: returns as soon as matching mail arrives (or an empty page after 30 s)
+var next = await client.ReceivedEmailListAsync(new ReceivedEmailListOptions { InboxId = inboxId, Wait = 30 });
+var held = next.Content!.Held;                                    // matching mail held in quarantine, ids only
+
+var reply = await client.ReceivedEmailReplyAsync(id, new EmailReplyOptions { Text = "Thanks, confirmed." },
+    idempotencyKey: $"reply-{id}");
+if (reply.Content!.IsDraft)
+    Console.WriteLine(string.Join(", ", reply.Content.Draft!.ApprovalReasons!));  // held for a person (HTTP 202)
+else
+    Console.WriteLine(reply.Content.Sent!.ThreadId);
+
+await client.ReceivedEmailForwardAsync(id, new EmailForwardOptions { To = "ops@acme.dev", Mode = "attachment" });
+await client.ReceivedEmailDeleteAsync(id);                        // erase now
+await client.ReceivedEmailAttachmentListAsync(id);                // signed download links, valid one hour
+await client.ReceivedEmailAttachmentRetrieveAsync(id, attachmentId);
+```
+
+Held mail is invisible to inbox-scoped keys: a detail read answers 403
+`email_quarantined`. `IncludeQuarantined = true` lists it for full-access keys.
+`Wait` holds the request for up to 50 seconds, which the default `HttpClient`
+timeout (100 s) covers.
+
+### Inboxes
+
+An inbox is one address that receives mail, read by an agent (`Kind = "agent"`,
+the default) or by people (`"human"`), with threads in both directions. The
+paths mirror Resend's Inboxes API; `Kind`, `Shared`, `ExpiresAt`, safety,
+quarantine and codes are MillionSend extensions. Folder, verdict, kind and
+status values are plain strings, so new server values never break decoding.
+
+```csharp
+var inbox = await client.InboxCreateAsync(new InboxCreateOptions
+{
+    Name = "Signup bot", ExpiresIn = "24h",          // no EmailAddress: a random address on the shared domain
+    Safety = new InboxSafetyOptions { AcceptFrom = "anyone" },
+});
+var inboxId = inbox.Content!.Id;
+await client.InboxListAsync(new InboxListOptions { Kind = "agent" });
+await client.InboxRetrieveAsync("bot@acme.dev");                 // by id or address
+await client.InboxUpdateAsync(inboxId, new InboxUpdateOptions { ExpiresIn = Optional<string>.Null }); // never expires
+await client.InboxDeleteAsync(inboxId);
+
+// Verification codes and sign-in links (links are never fetched)
+var code = await client.InboxCodeLatestAsync(inboxId, new InboxCodeLatestOptions { From = "github.com", Wait = 30 });
+if (code.Content!.Status == "found")
+    Console.WriteLine(code.Content.Code ?? code.Content.Url);
+
+// Safety rules (inbox-scoped keys can read them, never change them)
+await client.InboxSafetyRetrieveAsync(inboxId);
+await client.InboxSafetyUpdateAsync(inboxId, new InboxSafetyOptions
+{
+    AcceptFrom = "allowlist", Allowlist = new() { "*@partner.dev" }, SendPolicy = "reply_only", SendCap = 100,
+});
+
+// Quarantine: held mail is kept and listed until a person releases it
+await client.InboxQuarantineListAsync(inboxId);
+await client.InboxQuarantineReleaseAsync(inboxId, emailId, trustSender: true);   // also allowlists the sender
+
+// Threads and their emails
+await client.InboxThreadListAsync(inboxId, new InboxThreadListOptions { Folders = new() { "inbox", "archive" }, Read = false });
+await client.InboxThreadSearchAsync(inboxId, new InboxThreadSearchOptions { Query = "invoice -draft", From = new() { "acme" } });
+await client.InboxThreadRetrieveAsync(inboxId, threadId);
+await client.InboxThreadUpdateAsync(inboxId, threadId, new InboxThreadUpdateOptions { Read = true, Folder = "archive" });
+await client.InboxThreadDeleteAsync(inboxId, threadId);            // to trash, purged after 30 days
+await client.InboxThreadEmailListAsync(inboxId, threadId);         // oldest first
+await client.InboxThreadEmailRetrieveAsync(inboxId, threadId, emailId);
+await client.InboxThreadEmailReplyAsync(inboxId, threadId, emailId, new EmailReplyOptions { Text = "On it" });
+await client.InboxThreadEmailForwardAsync(inboxId, threadId, emailId, new EmailForwardOptions { To = "ops@acme.dev" });
+
+// Labels
+var label = await client.InboxLabelCreateAsync(inboxId, new InboxLabelOptions { Name = "Billing" });
+await client.InboxLabelListAsync(inboxId);
+await client.InboxLabelUpdateAsync(inboxId, label.Content!.Id, new InboxLabelOptions { Color = "#FF8800" });
+await client.InboxLabelDeleteAsync(inboxId, label.Content.Id);
+
+// Drafts, including the ones the send rules hold for approval
+var draft = await client.InboxDraftCreateAsync(inboxId, new InboxDraftCreateOptions
+{
+    To = "ada@example.com", Subject = "Hello", Text = "Hi Ada",
+});
+var draftId = draft.Content!.Id;
+await client.InboxDraftListAsync(inboxId);
+await client.InboxDraftRetrieveAsync(inboxId, draftId);
+await client.InboxDraftUpdateAsync(inboxId, draftId, new InboxDraftUpdateOptions { Subject = Optional<string>.Null });
+var sent = await client.InboxDraftSendAsync(inboxId, draftId);      // InboxSendResult<InboxDraft>
+await client.InboxDraftRejectAsync(inboxId, draftId);               // approvers only
+await client.InboxDraftDeleteAsync(inboxId, draftId);
+```
+
+Reply, forward and draft send answer an `InboxSendResult<T>`: `IsDraft` (and
+`Kind == "draft"`) when the inbox's send rules held the message for a person to
+approve (the API's 202), else `Sent`. An inbox-scoped key sending a pending
+draft gets 403 `approval_required`. Hosted agent settings
+(`/inboxes/{id}/agent`) are not exposed: MillionSend runs no agent of its own.
+
 ### Domains
 
 ```csharp
@@ -326,8 +438,12 @@ await client.DomainListAsync();
 await client.DomainRetrieveAsync(id);
 await client.DomainVerifyAsync(id);
 await client.DomainUpdateAsync(id, new DomainUpdateOptions { ClickTracking = false });
+await client.DomainUpdateAsync(id, new DomainUpdateOptions { ReceivingCatchAll = true }); // paid plans on Cloud
 await client.DomainDeleteAsync(id);
 ```
+
+`Domain.ReceivingCatchAll`: on, mail to addresses without an inbox lands in the
+received list; off, those addresses are refused at SMTP time.
 
 ### Webhooks
 
@@ -356,6 +472,13 @@ overlap window is open. Subscribable events are the `email.*` set plus
 `deliverability.*`, `quota.*`, `contact.created|updated|deleted|unsubscribed|resubscribed|topic_opt_in|topic_opt_out`
 and `suppression.added|removed`.
 
+`email.received` and the inbox events (`inbox.created|updated|deleted|expired`,
+`inbox.thread.created|folder.updated|labels.updated`,
+`inbox.email.received|sent|quarantined`, `inbox.draft.created|updated|sent|deleted`)
+reach only endpoints that name them; an endpoint subscribed to all events skips
+them. `InboxIds` narrows them to some inboxes; `Optional<List<Guid>>.Null` on
+update removes the filter.
+
 ### API keys
 
 ```csharp
@@ -363,6 +486,9 @@ var key = await client.ApiKeyCreateAsync("ci", ApiKeyPermission.SendingAccess, d
 Console.WriteLine(key.Content!.Token);   // shown once
 await client.ApiKeyListAsync();
 await client.ApiKeyDeleteAsync(key.Content.Id);
+
+// A key restricted to one inbox: it reads that inbox and sends from its address only
+await client.ApiKeyCreateAsync(new ApiKeyCreateOptions { Name = "support-agent", InboxId = inboxId });
 ```
 
 ### Templates
@@ -423,7 +549,9 @@ Method names and payload shapes otherwise line up. Notes:
   is put on the wire and the server answers 422.
 - **MillionSend extensions** (no Resend counterpart): segments, contact batch import,
   batch get and batch remove, `include=` on contact lists, `erase` on contact deletes,
-  contact preference links, webhook secret rotation, usage, email insights, deliverability.
+  contact preference links, webhook secret rotation, usage, email insights, deliverability,
+  and on received mail and inboxes the long-poll `Wait`, received-mail reply/forward/delete,
+  inbox safety, codes, quarantine, draft reject and the extension fields.
 
 ## Development
 
