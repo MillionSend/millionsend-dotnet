@@ -24,7 +24,7 @@ var client = new MillionSendClient("ms_123");                             // Mil
 var res = await client.EmailSendAsync(new EmailMessage
 {
     From = "Acme <onboarding@acme.dev>",
-    To = "delivered@resend.dev",
+    To = "success@simulator.amazonses.com",
     Subject = "Hello from MillionSend",
     Html = "<strong>It works!</strong>",
 });
