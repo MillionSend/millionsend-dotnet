@@ -151,7 +151,7 @@ public sealed class MillionSendClient : IMillionSend
         {
             var text = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
             if (!response.IsSuccessStatusCode)
-                return MillionSendResponse<T>.Fail(ParseError((int)response.StatusCode, text));
+                return MillionSendResponse<T>.Fail(ParseError((int)response.StatusCode, text, (int?)response.Headers.RetryAfter?.Delta?.TotalSeconds));
             try
             {
                 var content = string.IsNullOrEmpty(text) ? default : read((int)response.StatusCode, text);
@@ -189,7 +189,8 @@ public sealed class MillionSendClient : IMillionSend
         return parts.Count == 0 ? string.Empty : "?" + string.Join("&", parts);
     }
 
-    private static MillionSendException ParseError(int status, string? text)
+    // retryAfter is the header's seconds form; its HTTP-date form, which the API never sends, reads as null.
+    private static MillionSendException ParseError(int status, string? text, int? retryAfter)
     {
         var name = "application_error";
         var message = $"Request failed with status {status}";
@@ -211,7 +212,7 @@ public sealed class MillionSendClient : IMillionSend
                 // Non-JSON error body → keep the status-derived defaults.
             }
         }
-        return new MillionSendException(message, statusCode, name);
+        return new MillionSendException(message, statusCode, name) { RetryAfter = retryAfter };
     }
 
     private static string Enc(string value) => Uri.EscapeDataString(value);

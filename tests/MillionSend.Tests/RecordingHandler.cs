@@ -30,6 +30,9 @@ internal sealed class RecordingHandler : HttpMessageHandler
     public List<Call> Calls { get; } = new();
     public HttpStatusCode Status { get; set; } = HttpStatusCode.OK;
     public string ResponseBody { get; set; } = "{\"id\":\"11111111-1111-1111-1111-111111111111\"}";
+    public string MediaType { get; set; } = "application/json";
+    /// <summary>The response's <c>retry-after</c> header value, sent when set.</summary>
+    public string? RetryAfter { get; set; }
     public Exception? Throw { get; set; }
 
     public Call Last => Calls[^1];
@@ -55,10 +58,12 @@ internal sealed class RecordingHandler : HttpMessageHandler
             validation));
 
         if (Throw is not null) throw Throw;
-        return new HttpResponseMessage(Status)
+        var response = new HttpResponseMessage(Status)
         {
-            Content = new StringContent(ResponseBody, Encoding.UTF8, "application/json"),
+            Content = new StringContent(ResponseBody, Encoding.UTF8, MediaType),
         };
+        if (RetryAfter is not null) response.Headers.TryAddWithoutValidation("Retry-After", RetryAfter);
+        return response;
     }
 
     public JsonElement LastJson() => JsonDocument.Parse(Last.Body!).RootElement;
