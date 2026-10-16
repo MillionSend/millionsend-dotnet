@@ -100,7 +100,9 @@ public class ListOptions
 {
     /// <summary>1–100; the API defaults to 20.</summary>
     public int? Limit { get; init; }
+    /// <summary>The last id of a page: returns the next page, older items on the newest-first lists.</summary>
     public Guid? After { get; init; }
+    /// <summary>The first id of a page: returns the previous page, newer items on the newest-first lists.</summary>
     public Guid? Before { get; init; }
 }
 
@@ -142,6 +144,11 @@ public sealed class BatchError
     /// <summary>Position of the item in the request array.</summary>
     public int Index { get; init; }
     public string? Message { get; init; }
+    /// <summary>Contacts batch only: the status strict mode would answer for the item. Null on email
+    /// batches and from instances before v0.12.0.</summary>
+    [JsonPropertyName("statusCode")] public int? StatusCode { get; init; }
+    /// <summary>Contacts batch only: the error name strict mode would answer, e.g. <c>validation_error</c>.</summary>
+    public string? Name { get; init; }
 }
 
 /// <summary>Envelope for endpoints that return a bare <c>{ "data": [...] }</c>
@@ -185,8 +192,12 @@ public sealed class EmailMessageTemplate
 
 public sealed class EmailMessage
 {
+    /// <summary>An address on a verified domain, or an inbox's exact address on the shared domain (open mode only).</summary>
     public string From { get; init; } = string.Empty;
+    /// <summary>An address here or in <see cref="Cc"/>/<see cref="Bcc"/> on a domain that can never receive
+    /// mail (<c>example.com</c>, <c>.test</c>, …) answers 422.</summary>
     public Recipients To { get; init; } = null!;
+    /// <summary>Up to 998 characters.</summary>
     public string Subject { get; init; } = string.Empty;
     public string? Html { get; init; }
     public string? Text { get; init; }
@@ -555,7 +566,9 @@ public sealed class BroadcastCreateOptions
 {
     public string? Name { get; init; }
     public Guid? SegmentId { get; init; }
+    /// <summary>Never the shared domain: sending from it answers 403 <c>inbox_send_policy</c>.</summary>
     public string From { get; init; } = string.Empty;
+    /// <summary>Up to 998 characters.</summary>
     public string Subject { get; init; } = string.Empty;
     public string? Html { get; init; }
     public string? Text { get; init; }
@@ -573,6 +586,7 @@ public sealed class BroadcastUpdateOptions
     public string? Name { get; init; }
     public Guid? SegmentId { get; init; }
     public string? From { get; init; }
+    /// <summary>Up to 998 characters.</summary>
     public string? Subject { get; init; }
     public string? Html { get; init; }
     public string? Text { get; init; }
@@ -742,6 +756,14 @@ public sealed class Domain
     public bool? ReceivingCatchAll { get; init; }
     /// <summary>DNS records to publish; absent on list items.</summary>
     public List<DomainRecord>? Records { get; init; }
+    /// <summary>True on the team's read-only subdomain of the shared inbox domain, listed last; it sends
+    /// only from its inboxes' own addresses. Instances before v0.14.0 omit it, which reads as false.</summary>
+    public bool Shared { get; init; }
+    /// <summary>Shared row only: <c>open</c> (starts conversations), <c>reply_only</c> (replies inside
+    /// threads) or <c>receive_only</c> (sends nothing); null on your own domains.</summary>
+    public string? SendingMode { get; init; }
+    /// <summary>Shared row only: what holds sending below <c>open</c>, <c>plan</c> or <c>instance</c>; null in open mode.</summary>
+    public string? SendingModeReason { get; init; }
 }
 
 // ---- webhooks ------------------------------------------------------------
@@ -821,7 +843,7 @@ public sealed class ApiKeyCreateOptions
 {
     public string Name { get; init; } = string.Empty;
     public ApiKeyPermission? Permission { get; init; }
-    /// <summary>Restrict a sending key to one domain.</summary>
+    /// <summary>Restrict a sending key to one of your own domains; the <see cref="Domain.Shared"/> row answers 422.</summary>
     public Guid? DomainId { get; init; }
     /// <summary>Restrict a full-access key to one inbox: it reads that inbox and sends from its address only. Not combinable with <see cref="DomainId"/>.</summary>
     public Guid? InboxId { get; init; }
@@ -924,13 +946,14 @@ public sealed class ReceivedEmailListOptions : ListOptions
     public int? Wait { get; init; }
     /// <summary>ISO 8601: only mail received after this instant.</summary>
     public string? Since { get; init; }
+    /// <summary>An inbox that doesn't exist answers 404 <c>not_found</c> at once, even with <see cref="Wait"/>.</summary>
     public Guid? InboxId { get; init; }
     /// <summary>An address the message was delivered to (<c>received_for</c>).</summary>
     public string? To { get; init; }
     /// <summary>A sender address, or a domain that also covers its subdomains.</summary>
     public string? From { get; init; }
     public string? SubjectContains { get; init; }
-    /// <summary>Needs <see cref="InboxId"/>.</summary>
+    /// <summary>Needs <see cref="InboxId"/>, except with an inbox-scoped key, which reads its own inbox.</summary>
     public bool? Unread { get; init; }
     /// <summary>Also list held mail; needs a full-access key that is not scoped to an inbox.</summary>
     public bool IncludeQuarantined { get; init; }
@@ -1131,7 +1154,7 @@ public sealed class Inbox
     public Guid Id { get; init; }
     public string? Name { get; init; }
     public string? EmailAddress { get; init; }
-    /// <summary>The custom domain's id, or for a shared-domain inbox the team's shared subdomain id.</summary>
+    /// <summary>The custom domain's id; for a shared-domain inbox, the id of the team's <see cref="Domain.Shared"/> row.</summary>
     public Guid? DomainId { get; init; }
     /// <summary>Set for forwarding inboxes: the address to forward mail to.</summary>
     public string? ReceivingAddress { get; init; }
@@ -1152,18 +1175,31 @@ public sealed class Inbox
     public int? PendingApproval { get; init; }
 }
 
-/// <summary>Body of <c>POST /inboxes</c>. Without <see cref="EmailAddress"/> the inbox
-/// gets a random address on the shared domain (when the instance has one).</summary>
+/// <summary>Body of <c>POST /inboxes</c>. Without <see cref="EmailAddress"/> or <see cref="DomainId"/>
+/// the inbox gets an address on the instance's shared domain: <see cref="Username"/>, or a random one.</summary>
 public sealed class InboxCreateOptions
 {
+    /// <summary>An address on one of your verified domains.</summary>
     public string? EmailAddress { get; init; }
+    /// <summary>Instead of <see cref="EmailAddress"/>, the id of a <c>DomainListAsync</c> row: the
+    /// <see cref="Domain.Shared"/> row works like leaving both out; one of your own domains needs
+    /// <see cref="Username"/>, and receiving on or <see cref="Forwarding"/>.</summary>
+    public Guid? DomainId { get; init; }
+    /// <summary>The part before the @. On the shared domain it is optional (random when omitted): 1–64 of
+    /// <c>a-z 0-9 . _ -</c>, starting and ending with a letter or digit; reserved names, a <c>fwd-</c>
+    /// prefix and brand look-alikes answer 422, one in use 409. Required with the
+    /// <see cref="DomainId"/> of one of your own domains.</summary>
+    public string? Username { get; init; }
+    /// <summary>1–320 characters.</summary>
     public string? Name { get; init; }
+    /// <summary>Reviewed on the shared domain, like <see cref="Username"/>.</summary>
     public string? FromName { get; init; }
     /// <summary>Provision a <c>receiving_address</c> to forward mail to.</summary>
     public bool? Forwarding { get; init; }
     /// <summary><c>agent</c> (the default) or <c>human</c>.</summary>
     public string? Kind { get; init; }
-    /// <summary>Like <c>1h</c> or <c>30d</c>. Shared-domain inboxes default to 24 hours, at most 30 days.</summary>
+    /// <summary><c>1h</c> to <c>365d</c>; omitted, the inbox never expires. A shared-domain inbox
+    /// unused for 90 days is deleted either way.</summary>
     public string? ExpiresIn { get; init; }
     /// <summary>Safety rules to start with; the rest keep the defaults for the kind.</summary>
     public InboxSafetyOptions? Safety { get; init; }
@@ -1171,10 +1207,11 @@ public sealed class InboxCreateOptions
 
 public sealed class InboxUpdateOptions
 {
+    /// <summary>1–320 characters.</summary>
     public string? Name { get; init; }
-    /// <summary><c>""</c> removes the display name.</summary>
+    /// <summary><c>""</c> removes the display name. Reviewed on the shared domain.</summary>
     public string? FromName { get; init; }
-    /// <summary>Like <c>1h</c> or <c>30d</c>, counted from now; <c>Optional&lt;string&gt;.Null</c> for never.</summary>
+    /// <summary><c>1h</c> to <c>365d</c>, counted from now; <c>Optional&lt;string&gt;.Null</c> for never.</summary>
     public Optional<string>? ExpiresIn { get; init; }
 }
 
@@ -1210,14 +1247,18 @@ public sealed class InboxSafetyOptions
     public string? AcceptFrom { get; init; }
     /// <summary><c>local@domain</c>, or <c>*@domain</c> for a domain and its subdomains. Replaces the list.</summary>
     public List<string>? Allowlist { get; init; }
+    /// <summary>On the shared domain they don't make senders trusted.</summary>
     public List<string>? OwnerAddresses { get; init; }
     public bool? Screening { get; init; }
     public bool? ExtractCodes { get; init; }
+    /// <summary>On the shared domain, <c>allowlist</c> answers 422, and so does <c>open</c> unless the
+    /// shared row's <see cref="Domain.SendingMode"/> is <c>open</c>.</summary>
     public string? SendPolicy { get; init; }
     public bool? RequireApproval { get; init; }
     public bool? PrivateCodes { get; init; }
     /// <summary>Assign a number, or <c>Optional&lt;int?&gt;.Null</c> to remove the cap.</summary>
     public Optional<int?>? SendCap { get; init; }
+    /// <summary>Team members' sign-in addresses or <see cref="OwnerAddresses"/>; on the shared domain, members only.</summary>
     public List<string>? ForwardTo { get; init; }
 }
 
@@ -1244,8 +1285,12 @@ public sealed class InboxCodeLatestOptions
     public string? From { get; init; }
     /// <summary>Seconds (0–50) to wait for a code to arrive.</summary>
     public int? Wait { get; init; }
-    /// <summary>Ignore codes older than this many seconds (60–86400; the API defaults to 600).</summary>
+    /// <summary>Ignore codes delivered (or released from quarantine) longer ago than this many seconds
+    /// (60–86400; the API defaults to 600).</summary>
     public int? MaxAge { get; init; }
+    /// <summary>ISO 8601 with an offset: only mail received after this instant. Pass the previous code's
+    /// <see cref="VerificationCode.ReceivedAt"/> so a second sign-in waits for its own code.</summary>
+    public string? Since { get; init; }
 }
 
 /// <summary>An email held in an inbox's quarantine.</summary>
@@ -1306,7 +1351,9 @@ public sealed class InboxThread
     public List<InboxLabel>? Labels { get; init; }
     /// <summary>True when every message in the thread is read.</summary>
     public bool? Read { get; init; }
-    /// <summary>Held messages in the thread; owner views only, else 0.</summary>
+    /// <summary>Retrieve and update: held messages in the thread, 0 outside owner views. List and search
+    /// items: only with <c>IncludeQuarantined</c> in owner views (messages in quarantine, not released);
+    /// null otherwise.</summary>
     public int? Quarantined { get; init; }
     public string? From { get; init; }
     public List<string>? To { get; init; }
@@ -1438,7 +1485,8 @@ public sealed class InboxDraft
     public string? UpdatedAt { get; init; }
     /// <summary><c>draft</c>, <c>pending_approval</c>, <c>sent</c>, <c>rejected</c> or <c>expired</c>.</summary>
     public string? Status { get; init; }
-    /// <summary>Why the send rules held it, e.g. <c>send_policy</c>, <c>ramp</c>, <c>private_code</c>.</summary>
+    /// <summary>Why the send rules held it, e.g. <c>send_policy</c>, <c>ramp</c>, <c>private_code</c>,
+    /// <c>reply_to_redirect</c> (an agent's reply to a Reply-To at another organization).</summary>
     public List<string>? ApprovalReasons { get; init; }
     public bool? Forward { get; init; }
     public string? DecidedBy { get; init; }

@@ -611,6 +611,7 @@ public sealed class MillionSendClient : IMillionSend
             ["from"] = options?.From,
             ["wait"] = options?.Wait,
             ["max_age"] = options?.MaxAge,
+            ["since"] = options?.Since,
         }, cancellationToken: cancellationToken);
 
     public Task<MillionSendResponse<ListResponse<QuarantinedEmail>>> InboxQuarantineListAsync(Guid inboxId, ListOptions? options = null, CancellationToken cancellationToken = default)

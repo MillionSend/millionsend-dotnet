@@ -30,7 +30,8 @@ public class E2eTests
 
         var client = new MillionSendClient(new MillionSendClientOptions());
         var stamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-        var email = $"sdk-e2e-{stamp}@example.com";
+        // The API refuses contacts on domains that can never receive mail, example.com included.
+        var email = $"success+sdk-e2e-{stamp}@simulator.amazonses.com";
 
         var created = await client.ContactAddAsync(new ContactCreateOptions
         {

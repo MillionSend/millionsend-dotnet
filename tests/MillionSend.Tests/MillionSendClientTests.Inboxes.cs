@@ -97,6 +97,21 @@ public partial class MillionSendClientTests
     }
 
     [Fact]
+    public async Task ReceivedEmailList_unknown_inbox_is_404_even_with_wait()
+    {
+        var (client, handler) = NewClient(h =>
+        {
+            h.Status = HttpStatusCode.NotFound;
+            h.ResponseBody = """{ "statusCode": 404, "name": "not_found", "message": "Inbox not found." }""";
+        });
+
+        var res = await client.ReceivedEmailListAsync(new ReceivedEmailListOptions { InboxId = I1, Wait = 30 });
+        Assert.Equal($"?wait=30&inbox_id={I1}", handler.Last.Query);
+        Assert.Equal(404, res.Exception!.StatusCode);
+        Assert.Equal("not_found", res.Exception.ErrorName);
+    }
+
+    [Fact]
     public async Task ReceivedEmailRetrieve_decodes_the_extension_fields()
     {
         var (client, handler) = NewClient(h => h.ResponseBody = ReceivedJson);
@@ -314,6 +329,25 @@ public partial class MillionSendClientTests
     }
 
     [Fact]
+    public async Task InboxCreate_sends_username_and_domain_id_only_when_given()
+    {
+        var (client, handler) = NewClient(h =>
+        {
+            h.Status = HttpStatusCode.Created;
+            h.ResponseBody = InboxJson;
+        });
+
+        await client.InboxCreateAsync(new InboxCreateOptions { Username = "ada" });
+        AssertJson("""{ "username": "ada" }""", handler.Last.Body);
+
+        await client.InboxCreateAsync(new InboxCreateOptions { DomainId = SD1 });
+        AssertJson($$"""{ "domain_id": "{{SD1}}" }""", handler.Last.Body);
+
+        await client.InboxCreateAsync(new InboxCreateOptions { DomainId = D1, Username = "support" });
+        AssertJson($$"""{ "domain_id": "{{D1}}", "username": "support" }""", handler.Last.Body);
+    }
+
+    [Fact]
     public async Task InboxSafety_retrieve_and_update()
     {
         var (client, handler) = NewClient(h => h.ResponseBody = $$"""
@@ -375,6 +409,9 @@ public partial class MillionSendClientTests
         Assert.Equal(string.Empty, handler.Last.Query);
         Assert.Equal("timeout", none.Content!.Status);
         Assert.Null(none.Content.EmailId);
+
+        await client.InboxCodeLatestAsync(I1, new InboxCodeLatestOptions { Since = "2026-10-16T12:00:00.000Z" });
+        Assert.Equal("?since=2026-10-16T12%3A00%3A00.000Z", handler.Last.Query);
 
         handler.ResponseBody = $$"""
             { "object": "list", "has_more": false, "data": [{ "id": "{{SE1}}", "thread_id": "{{TH1}}",
@@ -514,6 +551,17 @@ public partial class MillionSendClientTests
         Assert.Equal("DELETE", handler.Last.Method);
         Assert.Equal($"/inboxes/{I1}/threads/{TH1}", handler.Last.Path);
         Assert.False(trashed.Content!.Deleted);
+    }
+
+    [Fact]
+    public async Task InboxThread_items_carry_quarantined_only_when_sent()
+    {
+        var (client, _) = NewClient(h => h.ResponseBody =
+            $$"""{ "object": "list", "has_more": false, "data": [{ {{ThreadItemJson}}, "quarantined": 2 }, { {{ThreadItemJson}} }] }""");
+
+        var list = await client.InboxThreadListAsync(I1, new InboxThreadListOptions { IncludeQuarantined = true });
+        Assert.Equal(2, list.Content!.Data[0].Quarantined);
+        Assert.Null(list.Content.Data[1].Quarantined);
     }
 
     [Fact]
@@ -705,5 +753,73 @@ public partial class MillionSendClientTests
         var w = await client.WebhookRetrieveAsync(W1);
         Assert.Equal(I1, Assert.Single(w.Content!.InboxIds!));
         Assert.Equal("inbox.thread.created", Assert.Single(w.Content.Events!));
+    }
+
+    // ---- the team's shared domain row --------------------------------------
+
+    private static readonly string SharedDomainJson = $$"""
+        "id": "{{SD1}}", "name": "acme.agents.example.com", "status": "verified",
+        "created_at": "2026-10-12T10:00:00.000Z", "region": "us-east-1", "open_tracking": false,
+        "click_tracking": false, "tracking_subdomain": null,
+        "capabilities": { "sending": "enabled", "receiving": "enabled" }, "receiving_catch_all": false, "shared": true
+        """;
+
+    [Fact]
+    public async Task Domains_list_ends_with_the_shared_row()
+    {
+        var (client, handler) = NewClient(h => h.ResponseBody = $$"""
+            { "object": "list", "has_more": false, "data": [
+              { "id": "{{D1}}", "name": "acme.dev", "status": "verified", "created_at": "2026-10-14T09:00:00.000Z",
+                "region": "us-east-1", "open_tracking": true, "click_tracking": true, "tracking_subdomain": "links",
+                "capabilities": { "sending": "enabled", "receiving": "enabled" }, "receiving_catch_all": false,
+                "shared": false },
+              { {{SharedDomainJson}}, "sending_mode": "reply_only", "sending_mode_reason": "plan" }
+            ] }
+            """);
+
+        var list = await client.DomainListAsync();
+        var own = list.Content!.Data[0];
+        Assert.False(own.Shared);
+        Assert.Null(own.SendingMode);
+        Assert.Null(own.SendingModeReason);
+        var shared = list.Content.Data[1];
+        Assert.True(shared.Shared);
+        Assert.Equal("reply_only", shared.SendingMode);
+        Assert.Equal("plan", shared.SendingModeReason);
+
+        // Servers before v0.14.0 send no shared key; sending_mode is an open set.
+        handler.ResponseBody = $$"""{ "object": "domain", "id": "{{D1}}", "name": "acme.dev", "status": "verified" }""";
+        Assert.False((await client.DomainRetrieveAsync(D1)).Content!.Shared);
+        handler.ResponseBody = $$"""{ "object": "domain", {{SharedDomainJson}}, "sending_mode": "paused_for_review" }""";
+        Assert.Equal("paused_for_review", (await client.DomainRetrieveAsync(SD1)).Content!.SendingMode);
+    }
+
+    [Fact]
+    public async Task Domains_shared_row_detail_and_403_on_change()
+    {
+        var (client, handler) = NewClient(h => h.ResponseBody = $$"""
+            { "object": "domain", {{SharedDomainJson}}, "sending_mode": "open", "sending_mode_reason": null, "records": [] }
+            """);
+
+        var detail = (await client.DomainRetrieveAsync(SD1)).Content!;
+        Assert.Equal($"/domains/{SD1}", handler.Last.Path);
+        Assert.Equal("domain", detail.Object);
+        Assert.Equal("acme.agents.example.com", detail.Name);
+        Assert.Equal("verified", detail.Status);
+        Assert.True(detail.Shared);
+        Assert.Equal("open", detail.SendingMode);
+        Assert.Null(detail.SendingModeReason);
+        Assert.Equal("enabled", detail.Capabilities!.Receiving);
+        Assert.Empty(detail.Records!);
+
+        handler.Status = HttpStatusCode.Forbidden;
+        handler.ResponseBody = """
+            { "statusCode": 403, "name": "forbidden",
+              "message": "acme.agents.example.com is your team's subdomain of the shared domain: it can't be changed or deleted" }
+            """;
+        var refused = await client.DomainUpdateAsync(SD1, new DomainUpdateOptions { ClickTracking = true });
+        Assert.Equal("PATCH", handler.Last.Method);
+        Assert.Equal(403, refused.Exception!.StatusCode);
+        Assert.Equal("forbidden", refused.Exception.ErrorName);
     }
 }
