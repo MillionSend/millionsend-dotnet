@@ -17,6 +17,12 @@ public sealed class MillionSendException : Exception
     /// </summary>
     public string ErrorName { get; }
 
+    /// <summary>
+    /// Seconds the response's <c>retry-after</c> header asks to wait before trying again;
+    /// <c>null</c> when it sent none (and on client-side failures).
+    /// </summary>
+    public int? RetryAfter { get; init; }
+
     public MillionSendException(string message, int? statusCode, string errorName)
         : base(message)
     {

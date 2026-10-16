@@ -71,11 +71,19 @@ No method throws for an API or transport error. Every call returns a
 - `Content` — the deserialized response body on success.
 - `Exception` — a `MillionSendException` on failure, carrying `StatusCode`
   (`int?`), `ErrorName` (the stable snake_case discriminant, e.g.
-  `validation_error`, `not_found`, `sending_paused`, `all_recipients_suppressed`),
-  and `Message`.
+  `validation_error`, `not_found`, `forbidden`, `rate_limit_exceeded`, `sending_paused`,
+  `all_recipients_suppressed`), `RetryAfter` (`int?`: the response's `retry-after`
+  header in seconds, `null` when it has none) and `Message`.
 
 `EmailSendAsync` and `EmailBatchAsync` answer 422 `all_recipients_suppressed` when
 every `To` recipient is on the suppression list or opted out of the send's `TopicId`.
+
+Inboxes add `inbox_send_policy` (403, a send the inbox's rules or the shared domain
+hold), `inbox_send_cap_reached` (429, the inbox's or the team's daily cap),
+`approval_required` (403), `email_quarantined` (403), `email_blocked` (410, a download
+of an email that carries malware), `too_many_waits` (429, too many concurrent
+long-polls) and `name_review_unavailable` (503, a name on the shared domain can't be
+reviewed yet).
 
 Transport and client-side failures (the request never reached the API) carry
 `StatusCode == null` and `ErrorName == "application_error"`.
@@ -87,6 +95,23 @@ if (!res.Success && res.Exception!.ErrorName == "not_found")
     // ...
 }
 ```
+
+### Retries
+
+The SDK never retries on its own. Worth retrying after `RetryAfter` seconds:
+503 `name_review_unavailable`, 429 `too_many_waits`, and 429 `rate_limit_exceeded`
+when `RetryAfter` is 60 or less (the per-minute limits). Not worth retrying in the same
+process: 429 `inbox_send_cap_reached` and the daily name-review budget (429
+`rate_limit_exceeded` with a `RetryAfter` that runs to the next UTC midnight), and any
+403, 404, 409 or 422. An unknown route answers 404 `not_found` (`application_error`
+from servers before v0.13.0, which answer it in plain text).
+
+Resend a send with the same idempotency key: a batch the API already accepted gets
+its stored response back. A held draft (`IsDraft`) is not a failure; never resend it.
+`InboxCreateAsync` takes no idempotency key: after a 429 or 503 nothing was created,
+but after a timeout a resend can create a second inbox. With a chosen `Username`, a
+409 on the resend usually means the first attempt succeeded: read it with
+`InboxRetrieveAsync(address)`.
 
 ## Clearing a field on update (`Optional<T>`)
 
@@ -106,8 +131,35 @@ await client.BroadcastUpdateAsync(id, new BroadcastUpdateOptions { TopicId = Opt
 ```
 
 Available on contact `FirstName`/`LastName`, broadcast `TopicId`, template
-`Subject`/`Text`/`Alias`, domain `TrackingSubdomain`, and contact-property
-`FallbackValue`. A `null` value inside `Properties` clears that key.
+`Subject`/`Text`/`Alias`, domain `TrackingSubdomain`, contact-property
+`FallbackValue`, inbox `ExpiresIn`, safety `SendCap`, draft
+`To`/`Cc`/`Bcc`/`Subject`/`Html`/`Text` and webhook `InboxIds`. A `null`
+value inside `Properties` clears that key.
+
+## Pagination
+
+List methods take a `ListOptions` (`Limit`, and the keyset cursors `After` and
+`Before`) and return `Data` and `HasMore`. Lists run newest first (MillionSend v0.13.0
+and later): `After` takes the last id of a page and pages toward older items, `Before`
+takes the first id and pages toward newer ones, and `HasMore` refers to that direction.
+Threads sort by last activity, drafts by last update, a thread's emails run oldest
+first, and labels and topics are not paginated.
+
+```csharp
+// Incremental sync: page toward newer items, starting from the newest id you stored
+Guid? before = newestStoredId;
+while (true)
+{
+    var page = await client.EmailListAsync(new ListOptions { Before = before, Limit = 100 });
+    if (!page.Success || page.Content!.Data.Count == 0) break;
+    Save(page.Content.Data);                       // newest first within the page
+    if (!page.Content.HasMore) break;
+    before = page.Content.Data[0].Id;
+}
+```
+
+A cursor whose item was deleted answers 422 `validation_error` (404 `not_found` on
+the inbox lists): start again without a cursor and stop at the ids you already have.
 
 ## Resources
 
@@ -129,6 +181,13 @@ await client.EmailInsightsRetrieveAsync(id);                        // GET /emai
 (`Filename`, base64 `Content`, `ContentType`, `ContentId`, `Path`), `Headers`, and
 `Template` (passed through; the server answers 422 until template sending ships).
 
+`Subject` takes up to 998 characters. A `To`, `Cc` or `Bcc` address on a domain that
+can never receive mail (`example.com`, `.test`, `.invalid`, `.localhost`, a TLD that
+doesn't exist, …) answers 422 `validation_error`; to test sending without emailing
+anyone, use `success@simulator.amazonses.com`. An inbox's address on the shared domain
+can be the `From` too, under the rules in
+[Sending from the shared domain](#sending-from-the-shared-domain).
+
 Batches take up to 100 messages. `BatchValidationMode.Permissive` sends the
 `x-batch-validation` header so valid items go out and invalid ones come back in
 `Errors` (the default, `Strict`, rejects the whole batch):
@@ -139,8 +198,12 @@ foreach (var err in res.Content!.Errors ?? new())
     Console.WriteLine($"item {err.Index}: {err.Message}");
 ```
 
-`EmailSendAsync` and `EmailBatchAsync` are the only endpoints that accept the
-`Idempotency-Key` header.
+Batch items never send from the shared domain: a strict batch fails with 403
+`inbox_send_policy` (the message starts with `emails.<index>: `), a permissive one
+lists the item in `Errors`.
+
+The sends take an `Idempotency-Key`: `EmailSendAsync`, `EmailBatchAsync`, replies,
+forwards and `InboxDraftSendAsync`.
 
 `EmailRetrieveAsync` includes a `Score` (0–10 best-practice score, `null` when
 the email has no insights). `EmailInsightsRetrieveAsync` returns the full
@@ -196,6 +259,8 @@ var batch = await client.ContactBatchAsync(contacts, new ContactBatchOptions
     Validation = BatchValidationMode.Permissive,      // x-batch-validation header
 });
 Console.WriteLine($"{batch.Content!.Counts.Created} created, {batch.Content.Counts.Failed} failed");
+foreach (var err in batch.Content.Errors ?? new())   // permissive only: what strict mode would answer per item
+    Console.WriteLine($"item {err.Index}: {err.StatusCode} {err.Name} {err.Message}");
 
 // Bulk lookup (MillionSend extension): up to 1000 contacts by id or email in one request,
 // in request order; unknown entries are listed, not errors — one request against the rate limit
@@ -274,6 +339,10 @@ await client.BroadcastCancelAsync(id); // scheduled only
 await client.BroadcastDeleteAsync(id); // draft only
 ```
 
+`Subject` takes up to 998 characters. A broadcast never sends from the shared domain:
+`BroadcastAddAsync` with `Send = true` and `BroadcastSendAsync` answer 403
+`inbox_send_policy`.
+
 ### Segments (MillionSend extension)
 
 Dynamic segments are a saved filter over the team's contacts — a MillionSend
@@ -309,6 +378,162 @@ await client.SuppressionBatchRemoveAsync(new[] { "a@acme.dev" });   // by emails
 await client.SuppressionBatchRemoveAsync(new[] { id1, id2 });        // …or by ids
 ```
 
+### Receiving
+
+Mail received at your receiving domains and inboxes. Everything in a received
+email was written by its sender, so show its HTML only in a sandbox.
+
+```csharp
+var page = await client.ReceivedEmailListAsync(new ReceivedEmailListOptions
+{
+    InboxId = inboxId, From = "acme.dev", SubjectContains = "code", Limit = 20,   // newest first
+});
+var email = await client.ReceivedEmailRetrieveAsync(id);          // htmlFormat: "cid" keeps cid: references
+Console.WriteLine(email.Content!.ExtractedText);                  // the reply without quotes, signature or hidden text
+Console.WriteLine(email.Content.Screening?.SenderTrust);          // owner, allowlisted, known_thread, external, …
+Console.WriteLine(email.Content.Extracted?.Code);                 // a verification code, when one was found
+
+// Long-poll: returns as soon as matching mail arrives (or an empty page after 30 s)
+var next = await client.ReceivedEmailListAsync(new ReceivedEmailListOptions { InboxId = inboxId, Wait = 30 });
+var held = next.Content!.Held;                                    // matching mail held in quarantine, ids only
+
+var reply = await client.ReceivedEmailReplyAsync(id, new EmailReplyOptions { Text = "Thanks, confirmed." },
+    idempotencyKey: $"reply-{id}");
+if (reply.Content!.IsDraft)
+    Console.WriteLine(string.Join(", ", reply.Content.Draft!.ApprovalReasons!));  // held for a person (HTTP 202)
+else
+    Console.WriteLine(reply.Content.Sent!.ThreadId);
+
+await client.ReceivedEmailForwardAsync(id, new EmailForwardOptions { To = "ops@acme.dev", Mode = "attachment" });
+await client.ReceivedEmailDeleteAsync(id);                        // erase now
+await client.ReceivedEmailAttachmentListAsync(id);                // signed download links, valid one hour
+await client.ReceivedEmailAttachmentRetrieveAsync(id, attachmentId);
+```
+
+Held mail is invisible to inbox-scoped keys: a detail read answers 403
+`email_quarantined`. `IncludeQuarantined = true` lists it for full-access keys,
+`Quarantined = true` lists only held mail.
+`Wait` holds the request for up to 50 seconds, which the default `HttpClient`
+timeout (100 s) covers. `Unread` needs `InboxId` with a team key; an inbox-scoped key
+reads its own inbox. An `InboxId` that doesn't exist answers 404 `not_found` at once,
+even with `Wait`.
+
+### Inboxes
+
+An inbox is one address that receives mail, read by an agent (`Kind = "agent"`,
+the default) or by people (`"human"`), with threads in both directions. The
+paths mirror Resend's Inboxes API; `Kind`, `Shared`, `ExpiresAt`, safety,
+quarantine and codes are MillionSend extensions. Folder, verdict, kind and
+status values are plain strings, so new server values never break decoding.
+
+```csharp
+var inbox = await client.InboxCreateAsync(new InboxCreateOptions
+{
+    Name = "Signup bot",                             // no EmailAddress: an address on the shared domain
+    Username = "signup-bot",                         // signup-bot@<team>.<shared domain>; omit it for a random one
+    ExpiresIn = "24h",                               // "1h" to "365d"; omitted, it never expires
+    Safety = new InboxSafetyOptions { AcceptFrom = "anyone" },
+});
+var inboxId = inbox.Content!.Id;
+await client.InboxCreateAsync(new InboxCreateOptions { DomainId = domainId, Username = "orders" }); // orders@ a DomainListAsync row
+await client.InboxListAsync(new InboxListOptions { Kind = "agent" });
+await client.InboxRetrieveAsync("bot@acme.dev");                 // by id or address
+await client.InboxUpdateAsync(inboxId, new InboxUpdateOptions { ExpiresIn = Optional<string>.Null }); // never expires
+await client.InboxDeleteAsync(inboxId);
+
+// Verification codes and sign-in links (links are never fetched)
+var code = await client.InboxCodeLatestAsync(inboxId, new InboxCodeLatestOptions { From = "example.com", Wait = 30 });
+if (code.Content!.Status == "found")
+    Console.WriteLine(code.Content.Code ?? code.Content.Url);
+// The next sign-in: only a code received after the one already used
+await client.InboxCodeLatestAsync(inboxId, new InboxCodeLatestOptions { Since = code.Content.ReceivedAt, Wait = 30 });
+
+// Safety rules (inbox-scoped keys can read them, never change them)
+await client.InboxSafetyRetrieveAsync(inboxId);
+await client.InboxSafetyUpdateAsync(inboxId, new InboxSafetyOptions
+{
+    AcceptFrom = "allowlist", Allowlist = new() { "*@partner.dev" }, SendPolicy = "reply_only", SendCap = 100,
+});
+
+// Quarantine: held mail is kept and listed until a person releases it
+await client.InboxQuarantineListAsync(inboxId);
+await client.InboxQuarantineReleaseAsync(inboxId, emailId, trustSender: true);   // also allowlists the sender
+
+// Threads and their emails
+await client.InboxThreadListAsync(inboxId, new InboxThreadListOptions { Folders = new() { "inbox", "archive" }, Read = false });
+await client.InboxThreadListAsync(inboxId, new InboxThreadListOptions { IncludeQuarantined = true }); // owner views: a Quarantined count per thread
+await client.InboxThreadSearchAsync(inboxId, new InboxThreadSearchOptions { Query = "invoice -draft", From = new() { "acme" } });
+await client.InboxThreadRetrieveAsync(inboxId, threadId);
+await client.InboxThreadUpdateAsync(inboxId, threadId, new InboxThreadUpdateOptions { Read = true, Folder = "archive" });
+await client.InboxThreadDeleteAsync(inboxId, threadId);            // to trash, purged after 30 days
+await client.InboxThreadEmailListAsync(inboxId, threadId);         // oldest first
+await client.InboxThreadEmailRetrieveAsync(inboxId, threadId, emailId);   // includeQuarantined: true reads held mail (owner views)
+await client.InboxThreadEmailReplyAsync(inboxId, threadId, emailId, new EmailReplyOptions { Text = "On it" });
+await client.InboxThreadEmailForwardAsync(inboxId, threadId, emailId, new EmailForwardOptions { To = "ops@acme.dev" });
+
+// Labels
+var label = await client.InboxLabelCreateAsync(inboxId, new InboxLabelOptions { Name = "Billing" });
+await client.InboxLabelListAsync(inboxId);
+await client.InboxLabelUpdateAsync(inboxId, label.Content!.Id, new InboxLabelOptions { Color = "#FF8800" });
+await client.InboxLabelDeleteAsync(inboxId, label.Content.Id);
+
+// Drafts, including the ones the send rules hold for approval
+var draft = await client.InboxDraftCreateAsync(inboxId, new InboxDraftCreateOptions
+{
+    To = "ada@acme.dev", Subject = "Hello", Text = "Hi Ada",
+});
+var draftId = draft.Content!.Id;
+await client.InboxDraftListAsync(inboxId);
+await client.InboxDraftRetrieveAsync(inboxId, draftId);
+await client.InboxDraftUpdateAsync(inboxId, draftId, new InboxDraftUpdateOptions { Subject = Optional<string>.Null });
+var sent = await client.InboxDraftSendAsync(inboxId, draftId);      // InboxSendResult<InboxDraft>
+await client.InboxDraftRejectAsync(inboxId, draftId);               // approvers only
+await client.InboxDraftDeleteAsync(inboxId, draftId);
+```
+
+Reply, forward and draft send answer an `InboxSendResult<T>`: `IsDraft` (and
+`Kind == "draft"`) when the inbox's send rules held the message for a person to
+approve (the API's 202), else `Sent`. An agent's reply to a Reply-To at another
+organization is held that way too, with `reply_to_redirect` among its
+`ApprovalReasons`. An inbox-scoped key sending a pending draft gets 403
+`approval_required`. Hosted agent settings (`/inboxes/{id}/agent`) are not exposed:
+MillionSend runs no agent of its own.
+
+An inbox never expires unless `ExpiresIn` says so, and its `Name` takes up to 320
+characters. `DomainId` takes a `DomainListAsync` row instead of `EmailAddress`: the
+`Shared` row works like leaving both out, and one of your own domains needs a
+`Username` (and receiving on, or `Forwarding = true`).
+
+On the shared domain, an inbox unused for 90 days (no mail in or out, no API call on
+it) is deleted, which fires `inbox.expired`, then `inbox.deleted`. A chosen `Username`
+or `FromName` there is reviewed first: reserved names (`postmaster`, `admin`,
+`support`, `noreply`, …), a `fwd-` prefix and look-alikes of brands answer 422, a
+username in use 409, and 429 means today's review budget is spent. 503
+`name_review_unavailable` means try again after `RetryAfter` seconds: the review is
+down, or the team's new subdomain still waits for its own, and then every shared or
+forwarding create gets it. Safety rules differ there too: `SendPolicy = "allowlist"`
+answers 422, and so does `"open"` unless the team's `SendingMode` is `open`;
+`OwnerAddresses` don't make senders trusted; `ForwardTo` takes team members only.
+
+#### Sending from the shared domain
+
+What the team's shared addresses may send is the `SendingMode` of the `Shared` row of
+`DomainListAsync`: `open` starts conversations, `reply_only` only answers inside a
+thread to its own correspondents, and `receive_only` sends nothing. The same answers
+come back from `EmailSendAsync`, replies, forwards and drafts:
+
+- 403 `inbox_send_policy`: the mode doesn't allow this send (or the inbox's name looks
+  like a brand, which only replies even under `open`);
+- 429 `inbox_send_cap_reached`: the team's daily cap for the shared domain, with a
+  `RetryAfter` that runs to the next UTC midnight;
+- 422 `validation_error`: more than 10 distinct recipients across `To`, `Cc` and `Bcc`.
+
+`EmailSendAsync` takes a shared address in `open` mode only: the inbox's exact
+`EmailAddress` (no +tag), a display name left out or equal to its `FromName`, and no
+`ReplyTo`, `Attachments`, `Headers` or `ScheduledAt`. A key restricted to a domain
+gets 403 `restricted_api_key`. Batch items and broadcasts never send from the shared
+domain. Switch on `ErrorName` and `StatusCode`; the messages may change.
+
 ### Domains
 
 ```csharp
@@ -326,7 +551,30 @@ await client.DomainListAsync();
 await client.DomainRetrieveAsync(id);
 await client.DomainVerifyAsync(id);
 await client.DomainUpdateAsync(id, new DomainUpdateOptions { ClickTracking = false });
+await client.DomainUpdateAsync(id, new DomainUpdateOptions { ReceivingCatchAll = true }); // paid plans on Cloud
 await client.DomainDeleteAsync(id);
+```
+
+`Domain.ReceivingCatchAll`: on, mail to addresses without an inbox lands in the
+received list; off, those addresses are refused at SMTP time.
+
+On an instance with a shared inbox domain, the team's subdomain of it is the last row
+of `DomainListAsync` (`Shared == true`; MillionSend v0.14.0 and later). It is verified,
+has no DNS records, and its id is the `DomainId` of the team's shared inboxes. Its
+`SendingMode` (`open`, `reply_only` or `receive_only`) says what those inboxes may
+send, and `SendingModeReason` (`plan` or `instance`, `null` under `open`) why it is
+held below `open`. It is read-only: `DomainUpdateAsync`, `DomainVerifyAsync` and
+`DomainDeleteAsync` answer 403 `forbidden`, and an API key can't be restricted to it.
+It comes after every own domain whatever its `CreatedAt`, alone on the next page when
+they exactly fill one. A team whose new subdomain still waits for its name review has
+no such row yet. Older servers send no `shared`, which reads as `false`.
+
+It sends only from its inboxes' own addresses, so leave it out when picking a domain
+to send from:
+
+```csharp
+var domains = await client.DomainListAsync(new ListOptions { Limit = 100 });
+var sender = domains.Content?.Data.FirstOrDefault(d => d.Status == "verified" && !d.Shared);
 ```
 
 ### Webhooks
@@ -356,6 +604,15 @@ overlap window is open. Subscribable events are the `email.*` set plus
 `deliverability.*`, `quota.*`, `contact.created|updated|deleted|unsubscribed|resubscribed|topic_opt_in|topic_opt_out`
 and `suppression.added|removed`.
 
+The inbox events (`inbox.created|updated|deleted|expired`,
+`inbox.thread.created|folder.updated|labels.updated`,
+`inbox.email.received|sent|quarantined`, `inbox.draft.created|updated|sent|deleted`)
+reach only endpoints that name them; an endpoint subscribed to all events skips
+them but still gets `email.received`. `InboxIds` narrows the inbox events and
+`email.received` to some inboxes; `Optional<List<Guid>>.Null` on update removes
+the filter. Inbox events from sends made in the dashboard carry
+`data.source: "dashboard"`.
+
 ### API keys
 
 ```csharp
@@ -363,7 +620,13 @@ var key = await client.ApiKeyCreateAsync("ci", ApiKeyPermission.SendingAccess, d
 Console.WriteLine(key.Content!.Token);   // shown once
 await client.ApiKeyListAsync();
 await client.ApiKeyDeleteAsync(key.Content.Id);
+
+// A key restricted to one inbox: it reads that inbox and sends from its address only
+await client.ApiKeyCreateAsync(new ApiKeyCreateOptions { Name = "support-agent", InboxId = inboxId });
 ```
+
+`DomainId` takes one of your own domains: the `Shared` row of `DomainListAsync`
+answers 422 `validation_error`.
 
 ### Templates
 
@@ -423,7 +686,28 @@ Method names and payload shapes otherwise line up. Notes:
   is put on the wire and the server answers 422.
 - **MillionSend extensions** (no Resend counterpart): segments, contact batch import,
   batch get and batch remove, `include=` on contact lists, `erase` on contact deletes,
-  contact preference links, webhook secret rotation, usage, email insights, deliverability.
+  contact preference links, webhook secret rotation, usage, email insights, deliverability,
+  and on received mail and inboxes the long-poll `Wait`, received-mail reply/forward/delete,
+  inbox safety, codes, quarantine, draft reject, `Username` and `DomainId` on
+  `InboxCreateAsync`, and the extension fields; also `MillionSendException.RetryAfter`.
+
+## Server versions
+
+On a self-hosted instance, each feature needs at least this MillionSend version:
+
+| MillionSend | Features |
+|---|---|
+| v0.10.0 | Received mail and inboxes; `InboxIds` on webhooks, `InboxId` on API keys, `ReceivingCatchAll` on domains |
+| v0.11.0 | 422 for recipients that can never receive mail; a batch idempotency key replayed before validation |
+| v0.12.0 | `Username`; inboxes that never expire by default; sends from the shared domain under its mode; `name_review_unavailable`; `StatusCode` and `Name` on contacts batch errors |
+| v0.13.0 | Newest-first lists; `Since` on `InboxCodeLatestAsync`; `Quarantined` on thread items; inbox names up to 320 characters; `Unread` with an inbox-scoped key; 404 at once for an unknown `InboxId`; a JSON 404 for unknown routes |
+| v0.14.0 | `Shared`, `SendingMode` and `SendingModeReason` on domains; `DomainId` on `InboxCreateAsync`; `Subject` up to 998 characters |
+
+Older servers ignore options they don't know: before v0.12.0 `Username` is dropped
+and the address is random, before v0.14.0 `DomainId` is dropped, and before v0.13.0
+`Since` is dropped, so a code you already used can come back. If you must support them,
+check the created inbox's `EmailAddress`, and treat a code whose `ReceivedAt` isn't
+after `Since` as none.
 
 ## Development
 

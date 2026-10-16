@@ -101,6 +101,8 @@ public partial class MillionSendClientTests
         var err = Assert.Single(res.Content.Errors!);
         Assert.Equal(1, err.Index);
         Assert.Equal("to is required", err.Message);
+        Assert.Null(err.StatusCode);
+        Assert.Null(err.Name);
     }
 
     [Fact]
@@ -203,7 +205,7 @@ public partial class MillionSendClientTests
             {
               "data": [{ "object": "contact", "index": 0, "id": "{{C1}}", "status": "created" }],
               "counts": { "created": 1, "updated": 0, "skipped": 0, "failed": 1 },
-              "errors": [{ "index": 1, "message": "email: invalid" }]
+              "errors": [{ "index": 1, "statusCode": 422, "name": "validation_error", "message": "email: invalid" }]
             }
             """);
 
@@ -223,7 +225,10 @@ public partial class MillionSendClientTests
         Assert.Equal(C1, item.Id);
         Assert.Equal("created", item.Status);
         Assert.Equal(1, res.Content.Counts.Failed);
-        Assert.Equal(1, Assert.Single(res.Content.Errors!).Index);
+        var err = Assert.Single(res.Content.Errors!);
+        Assert.Equal(1, err.Index);
+        Assert.Equal(422, err.StatusCode);
+        Assert.Equal("validation_error", err.Name);
 
         await client.ContactBatchAsync(new[] { new ContactCreateOptions { Email = "a@x.dev" } });
         Assert.Equal(string.Empty, handler.Last.Query);

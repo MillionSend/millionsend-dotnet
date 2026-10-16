@@ -695,6 +695,74 @@ public partial class MillionSendClientTests
     }
 
     [Fact]
+    public async Task RetryAfter_reads_the_header_seconds_else_null()
+    {
+        var (client, handler) = NewClient(h =>
+        {
+            h.Status = HttpStatusCode.ServiceUnavailable;
+            h.ResponseBody = "{\"statusCode\":503,\"name\":\"name_review_unavailable\",\"message\":\"try again shortly\"}";
+            h.RetryAfter = "300";
+        });
+
+        var res = await client.InboxCreateAsync(new InboxCreateOptions());
+        Assert.Equal(503, res.Exception!.StatusCode);
+        Assert.Equal("name_review_unavailable", res.Exception.ErrorName);
+        Assert.Equal(300, res.Exception.RetryAfter);
+
+        handler.RetryAfter = null;
+        Assert.Null((await client.InboxCreateAsync(new InboxCreateOptions())).Exception!.RetryAfter);
+
+        handler.RetryAfter = "Fri, 16 Oct 2026 12:00:00 GMT";
+        Assert.Null((await client.InboxCreateAsync(new InboxCreateOptions())).Exception!.RetryAfter);
+    }
+
+    [Fact]
+    public async Task Unknown_route_404_is_not_found_as_json_application_error_as_text()
+    {
+        var (client, handler) = NewClient(h =>
+        {
+            h.Status = HttpStatusCode.NotFound;
+            h.MediaType = "text/plain";
+            h.ResponseBody = "404 Not Found";
+        });
+
+        var text = await client.InboxListAsync();
+        Assert.Equal(404, text.Exception!.StatusCode);
+        Assert.Equal("application_error", text.Exception.ErrorName);
+
+        handler.MediaType = "application/json";
+        handler.ResponseBody = "{\"statusCode\":404,\"name\":\"not_found\",\"message\":\"The requested endpoint does not exist.\"}";
+        var json = await client.InboxListAsync();
+        Assert.Equal(404, json.Exception!.StatusCode);
+        Assert.Equal("not_found", json.Exception.ErrorName);
+        Assert.Null(json.Exception.RetryAfter);
+    }
+
+    [Fact]
+    public async Task Never_sends_a_path_an_empty_or_dot_id_would_redirect()
+    {
+        var (client, handler) = NewClient();
+
+        foreach (var res in new[]
+        {
+            await client.TemplateDeleteAsync(".."),
+            await client.TemplateDeleteAsync("."),
+            await client.TemplateDeleteAsync(""),
+        })
+        {
+            Assert.False(res.Success);
+            Assert.Null(res.Exception!.StatusCode);
+            Assert.Equal("validation_error", res.Exception.ErrorName);
+        }
+        var inbox = await client.InboxRetrieveAsync("..");
+        Assert.Equal("validation_error", inbox.Exception!.ErrorName);
+        Assert.Empty(handler.Calls);
+
+        await client.TemplateDeleteAsync("...");
+        Assert.Equal("/templates/...", handler.Last.Path);
+    }
+
+    [Fact]
     public async Task TransportError_has_null_status()
     {
         var (client, _) = NewClient(h => h.Throw = new HttpRequestException("connection refused"));

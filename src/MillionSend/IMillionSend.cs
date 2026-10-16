@@ -14,6 +14,9 @@ namespace MillionSend;
 public interface IMillionSend
 {
     // Emails
+    /// <summary>Send one email (POST /emails). The shared domain sends only in <c>open</c> sending mode, from an
+    /// inbox's exact address (display name omitted or its from_name), without ReplyTo, Attachments, Headers or
+    /// ScheduledAt, to at most 10 recipients.</summary>
     Task<MillionSendResponse<CreateEmailResponse>> EmailSendAsync(EmailMessage message, string? idempotencyKey = null, CancellationToken cancellationToken = default);
     Task<MillionSendResponse<CreateEmailResponse>> EmailSendAsync(string idempotencyKey, EmailMessage message, CancellationToken cancellationToken = default);
     Task<MillionSendResponse<Email>> EmailRetrieveAsync(Guid id, CancellationToken cancellationToken = default);
@@ -23,6 +26,7 @@ public interface IMillionSend
     Task<MillionSendResponse<DeletedResponse>> EmailDeleteAsync(Guid id, CancellationToken cancellationToken = default);
     Task<MillionSendResponse<EmailInsights>> EmailInsightsRetrieveAsync(Guid id, CancellationToken cancellationToken = default);
     Task<MillionSendResponse<CancelEmailResponse>> EmailCancelAsync(Guid id, CancellationToken cancellationToken = default);
+    /// <summary>Send 1–100 emails (POST /emails/batch). An item from the shared domain answers 403 <c>inbox_send_policy</c>.</summary>
     Task<MillionSendResponse<DataResponse<CreateEmailResponse>>> EmailBatchAsync(IEnumerable<EmailMessage> messages, string? idempotencyKey = null, CancellationToken cancellationToken = default);
     Task<MillionSendResponse<DataResponse<CreateEmailResponse>>> EmailBatchAsync(string idempotencyKey, IEnumerable<EmailMessage> messages, CancellationToken cancellationToken = default);
     Task<MillionSendResponse<DataResponse<CreateEmailResponse>>> EmailBatchAsync(IEnumerable<EmailMessage> messages, BatchValidationMode validation, string? idempotencyKey = null, CancellationToken cancellationToken = default);
@@ -65,7 +69,8 @@ public interface IMillionSend
     Task<MillionSendResponse<TopicId>> TopicUpdateAsync(Guid id, TopicUpdateOptions options, CancellationToken cancellationToken = default);
     Task<MillionSendResponse<RemoveTopicResponse>> TopicDeleteAsync(Guid id, CancellationToken cancellationToken = default);
 
-    // Broadcasts
+    // Broadcasts. Sending one from the shared domain answers 403 inbox_send_policy, on create
+    // with Send = true and on BroadcastSendAsync.
     Task<MillionSendResponse<BroadcastId>> BroadcastAddAsync(BroadcastCreateOptions options, CancellationToken cancellationToken = default);
     Task<MillionSendResponse<Broadcast>> BroadcastRetrieveAsync(Guid id, CancellationToken cancellationToken = default);
     Task<MillionSendResponse<ListResponse<BroadcastListItem>>> BroadcastListAsync(ListOptions? options = null, CancellationToken cancellationToken = default);
@@ -95,9 +100,11 @@ public interface IMillionSend
 
     // Domains
     Task<MillionSendResponse<Domain>> DomainAddAsync(DomainCreateOptions options, CancellationToken cancellationToken = default);
+    /// <summary>Your own domains newest first, then the team's read-only subdomain of the shared inbox domain (<see cref="Domain.Shared"/>).</summary>
     Task<MillionSendResponse<ListResponse<Domain>>> DomainListAsync(ListOptions? options = null, CancellationToken cancellationToken = default);
     Task<MillionSendResponse<Domain>> DomainRetrieveAsync(Guid id, CancellationToken cancellationToken = default);
     Task<MillionSendResponse<Domain>> DomainVerifyAsync(Guid id, CancellationToken cancellationToken = default);
+    /// <summary>The shared row answers 403 <c>forbidden</c> here, on verify and on delete.</summary>
     Task<MillionSendResponse<Domain>> DomainUpdateAsync(Guid id, DomainUpdateOptions options, CancellationToken cancellationToken = default);
     Task<MillionSendResponse<DeletedResponse>> DomainDeleteAsync(Guid id, CancellationToken cancellationToken = default);
 
@@ -111,7 +118,10 @@ public interface IMillionSend
     Task<MillionSendResponse<WebhookRotateResponse>> WebhookRotateAsync(Guid id, WebhookRotateOptions? options = null, CancellationToken cancellationToken = default);
 
     // API keys
+    /// <param name="domainId">One of your own domains; the <see cref="Domain.Shared"/> row answers 422.</param>
     Task<MillionSendResponse<ApiKeyCreateResponse>> ApiKeyCreateAsync(string name, ApiKeyPermission? permission = null, Guid? domainId = null, CancellationToken cancellationToken = default);
+    /// <summary>Create a key from options, e.g. one restricted to an inbox (<see cref="ApiKeyCreateOptions.InboxId"/>).</summary>
+    Task<MillionSendResponse<ApiKeyCreateResponse>> ApiKeyCreateAsync(ApiKeyCreateOptions options, CancellationToken cancellationToken = default);
     Task<MillionSendResponse<ListResponse<ApiKey>>> ApiKeyListAsync(ListOptions? options = null, CancellationToken cancellationToken = default);
     Task<MillionSendResponse<DeletedResponse>> ApiKeyDeleteAsync(Guid id, CancellationToken cancellationToken = default);
 
@@ -130,4 +140,67 @@ public interface IMillionSend
 
     // Deliverability (account-level score over the trailing window)
     Task<MillionSendResponse<Deliverability>> DeliverabilityRetrieveAsync(CancellationToken cancellationToken = default);
+
+    // Received mail. Reply, forward and draft send answer an InboxSendResult: a draft
+    // when the inbox's send rules held the message for a person to approve.
+    /// <summary>Received mail, newest first (GET /emails/receiving). With <see cref="ReceivedEmailListOptions.Wait"/> the call long-polls.</summary>
+    Task<MillionSendResponse<ReceivedEmailList>> ReceivedEmailListAsync(ReceivedEmailListOptions? options = null, CancellationToken cancellationToken = default);
+    /// <param name="htmlFormat"><c>data_uri</c> (the default) inlines cid images; <c>cid</c> leaves the references.</param>
+    Task<MillionSendResponse<ReceivedEmail>> ReceivedEmailRetrieveAsync(Guid id, string? htmlFormat = null, CancellationToken cancellationToken = default);
+    Task<MillionSendResponse<InboxSendResult<ThreadEmail>>> ReceivedEmailReplyAsync(Guid id, EmailReplyOptions options, string? idempotencyKey = null, CancellationToken cancellationToken = default);
+    Task<MillionSendResponse<InboxSendResult<ThreadEmail>>> ReceivedEmailForwardAsync(Guid id, EmailForwardOptions options, string? idempotencyKey = null, CancellationToken cancellationToken = default);
+    /// <summary>Erase a received email now (a full-access key not scoped to an inbox).</summary>
+    Task<MillionSendResponse<DeletedResponse>> ReceivedEmailDeleteAsync(Guid id, CancellationToken cancellationToken = default);
+    /// <summary>Every attachment unless <see cref="ListOptions.Limit"/> is set, each with a signed download link valid for one hour.</summary>
+    Task<MillionSendResponse<ListResponse<ReceivedAttachment>>> ReceivedEmailAttachmentListAsync(Guid emailId, ListOptions? options = null, CancellationToken cancellationToken = default);
+    Task<MillionSendResponse<ReceivedAttachment>> ReceivedEmailAttachmentRetrieveAsync(Guid emailId, Guid id, CancellationToken cancellationToken = default);
+
+    // Inboxes (Resend's Inboxes paths; kind, safety, codes and quarantine are extensions)
+    /// <summary>Shared and forwarding creates answer 503 <c>name_review_unavailable</c> (see
+    /// <see cref="MillionSendException.RetryAfter"/>) while the team's subdomain awaits its name review, and so
+    /// does a chosen Username or FromName there while the review is down; a spent review budget answers 429.</summary>
+    Task<MillionSendResponse<Inbox>> InboxCreateAsync(InboxCreateOptions options, CancellationToken cancellationToken = default);
+    Task<MillionSendResponse<ListResponse<Inbox>>> InboxListAsync(InboxListOptions? options = null, CancellationToken cancellationToken = default);
+    /// <param name="idOrEmail">The inbox id or its address (case-insensitive).</param>
+    Task<MillionSendResponse<Inbox>> InboxRetrieveAsync(string idOrEmail, CancellationToken cancellationToken = default);
+    /// <summary>A new FromName on the shared domain is reviewed as on create (503, 429).</summary>
+    Task<MillionSendResponse<Inbox>> InboxUpdateAsync(Guid id, InboxUpdateOptions options, CancellationToken cancellationToken = default);
+    Task<MillionSendResponse<DeletedResponse>> InboxDeleteAsync(Guid id, CancellationToken cancellationToken = default);
+    Task<MillionSendResponse<InboxSafety>> InboxSafetyRetrieveAsync(Guid inboxId, CancellationToken cancellationToken = default);
+    /// <summary>Change only the rules set on <paramref name="options"/>; answers all of them. Inbox-scoped keys get 403.</summary>
+    Task<MillionSendResponse<InboxSafety>> InboxSafetyUpdateAsync(Guid inboxId, InboxSafetyOptions options, CancellationToken cancellationToken = default);
+    /// <summary>The newest verification code or sign-in link; with <see cref="InboxCodeLatestOptions.Wait"/> it long-polls.</summary>
+    Task<MillionSendResponse<VerificationCode>> InboxCodeLatestAsync(Guid inboxId, InboxCodeLatestOptions? options = null, CancellationToken cancellationToken = default);
+    Task<MillionSendResponse<ListResponse<QuarantinedEmail>>> InboxQuarantineListAsync(Guid inboxId, ListOptions? options = null, CancellationToken cancellationToken = default);
+    /// <param name="trustSender">Also add the sender's address to the inbox's allowlist.</param>
+    Task<MillionSendResponse<QuarantineRelease>> InboxQuarantineReleaseAsync(Guid inboxId, Guid emailId, bool trustSender = false, CancellationToken cancellationToken = default);
+    /// <summary>Oldest first, not paginated.</summary>
+    Task<MillionSendResponse<ListResponse<InboxLabel>>> InboxLabelListAsync(Guid inboxId, CancellationToken cancellationToken = default);
+    Task<MillionSendResponse<InboxLabel>> InboxLabelCreateAsync(Guid inboxId, InboxLabelOptions options, CancellationToken cancellationToken = default);
+    Task<MillionSendResponse<InboxLabel>> InboxLabelUpdateAsync(Guid inboxId, Guid labelId, InboxLabelOptions options, CancellationToken cancellationToken = default);
+    Task<MillionSendResponse<DeletedResponse>> InboxLabelDeleteAsync(Guid inboxId, Guid labelId, CancellationToken cancellationToken = default);
+    /// <summary>Most recently active first.</summary>
+    Task<MillionSendResponse<ListResponse<InboxThread>>> InboxThreadListAsync(Guid inboxId, InboxThreadListOptions? options = null, CancellationToken cancellationToken = default);
+    Task<MillionSendResponse<ListResponse<InboxThread>>> InboxThreadSearchAsync(Guid inboxId, InboxThreadSearchOptions? options = null, CancellationToken cancellationToken = default);
+    Task<MillionSendResponse<InboxThread>> InboxThreadRetrieveAsync(Guid inboxId, Guid threadId, CancellationToken cancellationToken = default);
+    Task<MillionSendResponse<InboxThread>> InboxThreadUpdateAsync(Guid inboxId, Guid threadId, InboxThreadUpdateOptions options, CancellationToken cancellationToken = default);
+    /// <summary>Move the thread to trash, purged after 30 days; <c>Deleted</c> is false when it was already there.</summary>
+    Task<MillionSendResponse<DeletedResponse>> InboxThreadDeleteAsync(Guid inboxId, Guid threadId, CancellationToken cancellationToken = default);
+    /// <summary>Oldest first; <see cref="ListOptions.After"/> pages to newer emails.</summary>
+    Task<MillionSendResponse<ListResponse<ThreadEmail>>> InboxThreadEmailListAsync(Guid inboxId, Guid threadId, InboxThreadEmailListOptions? options = null, CancellationToken cancellationToken = default);
+    /// <param name="includeQuarantined">Also read a held email (owner views); otherwise it answers 403 <c>email_quarantined</c>.</param>
+    Task<MillionSendResponse<ThreadEmail>> InboxThreadEmailRetrieveAsync(Guid inboxId, Guid threadId, Guid emailId, bool includeQuarantined = false, CancellationToken cancellationToken = default);
+    Task<MillionSendResponse<InboxSendResult<ThreadEmail>>> InboxThreadEmailReplyAsync(Guid inboxId, Guid threadId, Guid emailId, EmailReplyOptions options, string? idempotencyKey = null, CancellationToken cancellationToken = default);
+    Task<MillionSendResponse<InboxSendResult<ThreadEmail>>> InboxThreadEmailForwardAsync(Guid inboxId, Guid threadId, Guid emailId, EmailForwardOptions options, string? idempotencyKey = null, CancellationToken cancellationToken = default);
+    /// <summary>Unsent drafts, most recently updated first.</summary>
+    Task<MillionSendResponse<ListResponse<InboxDraft>>> InboxDraftListAsync(Guid inboxId, ListOptions? options = null, CancellationToken cancellationToken = default);
+    /// <summary>Answers the existing draft when a reply draft already targets that email.</summary>
+    Task<MillionSendResponse<InboxDraft>> InboxDraftCreateAsync(Guid inboxId, InboxDraftCreateOptions options, CancellationToken cancellationToken = default);
+    Task<MillionSendResponse<InboxDraft>> InboxDraftRetrieveAsync(Guid inboxId, Guid draftId, CancellationToken cancellationToken = default);
+    Task<MillionSendResponse<InboxDraft>> InboxDraftUpdateAsync(Guid inboxId, Guid draftId, InboxDraftUpdateOptions options, CancellationToken cancellationToken = default);
+    Task<MillionSendResponse<DeletedResponse>> InboxDraftDeleteAsync(Guid inboxId, Guid draftId, CancellationToken cancellationToken = default);
+    /// <summary>Send a draft. An inbox-scoped key sending a pending draft gets 403 <c>approval_required</c>.</summary>
+    Task<MillionSendResponse<InboxSendResult<InboxDraft>>> InboxDraftSendAsync(Guid inboxId, Guid draftId, string? idempotencyKey = null, CancellationToken cancellationToken = default);
+    /// <summary>Reject a draft waiting for approval (approvers only).</summary>
+    Task<MillionSendResponse<InboxDraft>> InboxDraftRejectAsync(Guid inboxId, Guid draftId, CancellationToken cancellationToken = default);
 }
