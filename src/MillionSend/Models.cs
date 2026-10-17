@@ -694,7 +694,7 @@ public sealed class Suppression
     public Guid Id { get; init; }
     public string? Email { get; init; }
     public SuppressionOrigin Origin { get; init; }
-    /// <summary>The email or broadcast that caused the suppression, when known.</summary>
+    /// <summary>The email whose bounce or complaint created the entry; null otherwise.</summary>
     public Guid? SourceId { get; init; }
     public string? CreatedAt { get; init; }
 }
