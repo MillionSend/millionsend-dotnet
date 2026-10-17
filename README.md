@@ -86,7 +86,9 @@ hold), `inbox_send_cap_reached` (429, the inbox's or the team's daily cap),
 `approval_required` (403), `email_quarantined` (403), `email_blocked` (410, a download
 of an email that carries malware), `too_many_waits` (429, too many concurrent
 long-polls) and `name_review_unavailable` (503, a name on the shared domain can't be
-reviewed yet).
+reviewed yet). A quarantine release adds `trust_not_allowed` (403) and
+`held_by_screening` (409), see [Inboxes](#inboxes); it answers `forbidden` (403) and
+`screening_unavailable` (503) only to MCP clients.
 
 Transport and client-side failures (the request never reached the API) carry
 `StatusCode == null` and `ErrorName == "application_error"`.
@@ -460,7 +462,7 @@ await client.InboxSafetyUpdateAsync(inboxId, new InboxSafetyOptions
 
 // Quarantine: held mail is kept and listed until a person releases it
 await client.InboxQuarantineListAsync(inboxId);
-await client.InboxQuarantineReleaseAsync(inboxId, emailId, trustSender: true);   // also allowlists the sender
+await client.InboxQuarantineReleaseAsync(inboxId, emailId);
 
 // Threads and their emails
 await client.InboxThreadListAsync(inboxId, new InboxThreadListOptions { Folders = new() { "inbox", "archive" }, Read = false });
@@ -501,6 +503,14 @@ organization is held that way too, with `reply_to_redirect` among its
 `ApprovalReasons`. An inbox-scoped key sending a pending draft gets 403
 `approval_required`. Hosted agent settings (`/inboxes/{id}/agent`) are not exposed:
 MillionSend runs no agent of its own.
+
+On an agent inbox with `Screening` on, mail held before screening ran
+(`not_allowlisted`, `unauthenticated_sender`, `failed_auth`) is screened at release
+when screening can run: if it finds prompt injection or phishing, the email stays held
+as `injection` or `phishing` (409 `held_by_screening`). `trustSender: true` also adds
+the sender to the allowlist, only for mail held as `not_allowlisted` from a sender that
+authenticated (`SenderTrust` `"external"`); anything else answers 403
+`trust_not_allowed`.
 
 An inbox never expires unless `ExpiresIn` says so, and its `Name` takes up to 320
 characters. `DomainId` takes a `DomainListAsync` row instead of `EmailAddress`: the
@@ -713,6 +723,7 @@ On a self-hosted instance, each feature needs at least this MillionSend version:
 | v0.13.0 | Newest-first lists; `Since` on `InboxCodeLatestAsync`; `Quarantined` on thread items; inbox names up to 320 characters; `Unread` with an inbox-scoped key; 404 at once for an unknown `InboxId`; a JSON 404 for unknown routes |
 | v0.14.0 | `Shared`, `SendingMode` and `SendingModeReason` on domains; `DomainId` on `InboxCreateAsync`; `Subject` up to 998 characters |
 | v0.15.1 | `email.scheduled`, `email.failed` and `email.suppressed` webhook events; `source_id` on `suppression.added` and `suppression.removed`; the `suppressed` email kept for an all-suppressed `EmailSendAsync` |
+| v0.16.0 | Release rules: `trustSender` only for a `not_allowlisted` hold from an authenticated sender (`trust_not_allowed`); screening at release (`held_by_screening`) |
 
 Older servers ignore options they don't know: before v0.12.0 `Username` is dropped
 and the address is random, before v0.14.0 `DomainId` is dropped, and before v0.13.0
