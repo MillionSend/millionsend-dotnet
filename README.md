@@ -77,6 +77,9 @@ No method throws for an API or transport error. Every call returns a
 
 `EmailSendAsync` and `EmailBatchAsync` answer 422 `all_recipients_suppressed` when
 every `To` recipient is on the suppression list or opted out of the send's `TopicId`.
+When the suppression list alone empties `To`, `EmailSendAsync` also keeps a
+metadata-only `suppressed` email, which fires `email.suppressed`; each retry keeps
+another, even with the same idempotency key.
 
 Inboxes add `inbox_send_policy` (403, a send the inbox's rules or the shared domain
 hold), `inbox_send_cap_reached` (429, the inbox's or the team's daily cap),
@@ -608,8 +611,10 @@ and `suppression.added|removed`.
 later; an older server refuses a webhook naming them with 422 `validation_error`.
 `email.failed` says why in `data.failed.reason`, and `email.suppressed` in
 `data.suppressed` (`type`, `message`, `reason`); treat their values as open sets.
+`suppression.added` and `suppression.removed` carry `data.source_id`, the email whose
+bounce or complaint created the entry (`null` otherwise).
 
-The inbox events (`inbox.created|updated|deleted|expired`,
+`email.prefetched` and the inbox events (`inbox.created|updated|deleted|expired`,
 `inbox.thread.created|folder.updated|labels.updated`,
 `inbox.email.received|sent|quarantined`, `inbox.draft.created|updated|sent|deleted`)
 reach only endpoints that name them; an endpoint subscribed to all events skips
@@ -707,7 +712,7 @@ On a self-hosted instance, each feature needs at least this MillionSend version:
 | v0.12.0 | `Username`; inboxes that never expire by default; sends from the shared domain under its mode; `name_review_unavailable`; `StatusCode` and `Name` on contacts batch errors |
 | v0.13.0 | Newest-first lists; `Since` on `InboxCodeLatestAsync`; `Quarantined` on thread items; inbox names up to 320 characters; `Unread` with an inbox-scoped key; 404 at once for an unknown `InboxId`; a JSON 404 for unknown routes |
 | v0.14.0 | `Shared`, `SendingMode` and `SendingModeReason` on domains; `DomainId` on `InboxCreateAsync`; `Subject` up to 998 characters |
-| v0.15.1 | `email.scheduled`, `email.failed` and `email.suppressed` webhook events; `source_id` on `suppression.added` and `suppression.removed` |
+| v0.15.1 | `email.scheduled`, `email.failed` and `email.suppressed` webhook events; `source_id` on `suppression.added` and `suppression.removed`; the `suppressed` email kept for an all-suppressed `EmailSendAsync` |
 
 Older servers ignore options they don't know: before v0.12.0 `Username` is dropped
 and the address is random, before v0.14.0 `DomainId` is dropped, and before v0.13.0
