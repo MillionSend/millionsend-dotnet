@@ -120,7 +120,19 @@ public enum ContactInclude { Properties, Topics }
 public enum SuppressionOrigin { Bounce, Complaint, Manual, Unsubscribe }
 public enum ApiKeyPermission { FullAccess, SendingAccess }
 public enum WebhookStatus { Enabled, Disabled }
-public enum ContactPropertyType { String, Number }
+
+public enum ContactPropertyType
+{
+    String,
+    Number,
+    /// <summary>MillionSend extension. A value must read as an ISO 8601 date (midnight UTC),
+    /// a date-time with <c>T</c> or a space (UTC when it names no zone), or Unix time in
+    /// seconds or milliseconds between 2000 and 2100; anything else answers 422.</summary>
+    Date,
+    /// <summary>A type added to the server after this SDK version. Read-only: never create with it.</summary>
+    Unknown,
+}
+
 public enum TopicVisibility { Private, Public }
 
 /// <summary><c>{ object, id }</c> acknowledgement returned by create/update actions.</summary>
@@ -407,7 +419,8 @@ public sealed class Contact
     public string? LastName { get; init; }
     public string? CreatedAt { get; init; }
     public bool Unsubscribed { get; init; }
-    /// <summary>Typed values as returned by the API: <c>{ "type": "string"|"number", "value": ... }</c> per key.</summary>
+    /// <summary>Typed values as returned by the API: <c>{ "type": "string"|"number"|"date", "value": ... }</c>
+    /// per key; a date's value is its text as stored.</summary>
     public Dictionary<string, object?>? Properties { get; init; }
 }
 
@@ -497,13 +510,15 @@ public sealed class ContactPropertyCreateOptions
 {
     public string Key { get; init; } = string.Empty;
     public ContactPropertyType Type { get; init; }
-    /// <summary>A string or a number, substituted when a contact has no value.</summary>
+    /// <summary>A string or a number, substituted when a contact has no value. A date
+    /// property's must read as a date.</summary>
     public object? FallbackValue { get; init; }
 }
 
 public sealed class ContactPropertyUpdateOptions
 {
-    /// <summary>A string or number, or <c>Optional&lt;object&gt;.Null</c> to clear.</summary>
+    /// <summary>A string or number (a date property's must read as a date), or
+    /// <c>Optional&lt;object&gt;.Null</c> to clear.</summary>
     public Optional<object>? FallbackValue { get; init; }
 }
 
@@ -512,10 +527,30 @@ public sealed class ContactProperty
     public string? Object { get; init; }
     public Guid Id { get; init; }
     public string? Key { get; init; }
+    // On the property, not the enum: a converter attribute on the enum type loses
+    // to the client's global JsonStringEnumConverter.
+    [JsonConverter(typeof(ContactPropertyTypeConverter))]
     public ContactPropertyType Type { get; init; }
     /// <summary>A string, a number or <c>null</c> (a <see cref="JsonElement"/> after deserialization).</summary>
     public object? FallbackValue { get; init; }
     public string? CreatedAt { get; init; }
+}
+
+// The server may add property types; a strict enum would make one unknown type
+// fail the whole response, so it reads as Unknown instead.
+internal sealed class ContactPropertyTypeConverter : JsonConverter<ContactPropertyType>
+{
+    public override ContactPropertyType Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+        => reader.GetString() switch
+        {
+            "string" => ContactPropertyType.String,
+            "number" => ContactPropertyType.Number,
+            "date" => ContactPropertyType.Date,
+            _ => ContactPropertyType.Unknown,
+        };
+
+    public override void Write(Utf8JsonWriter writer, ContactPropertyType value, JsonSerializerOptions options)
+        => writer.WriteStringValue(MillionSendClient.Wire(value));
 }
 
 // ---- topics --------------------------------------------------------------

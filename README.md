@@ -299,11 +299,28 @@ await client.ContactPropCreateAsync(new ContactPropertyCreateOptions
 {
     Key = "plan", Type = ContactPropertyType.String, FallbackValue = "free",
 });
+await client.ContactPropCreateAsync(new ContactPropertyCreateOptions
+{
+    Key = "last_login", Type = ContactPropertyType.Date,   // MillionSend extension
+});
 await client.ContactPropListAsync();
 await client.ContactPropRetrieveAsync(id);
 await client.ContactPropUpdateAsync(id, new ContactPropertyUpdateOptions { FallbackValue = "trial" });
 await client.ContactPropDeleteAsync(id);
 ```
+
+`Type` is `String` or `Number`, as on Resend, or `Date`. A date property's values,
+and its `FallbackValue`, must read as a date, or the write answers 422
+`validation_error`:
+
+- an ISO 8601 date such as `2026-01-08`, read as midnight UTC;
+- a date-time such as `2026-01-08T10:30:00Z` or `2026-01-08 10:30`, read as UTC
+  when it names no zone;
+- Unix time in seconds or milliseconds, such as `1767225600`, between 2000 and 2100.
+
+A contact's date comes back in `Properties` as
+`{ "type": "date", "value": "2026-01-08" }`, the text as stored. A type the server
+adds after this SDK version reads as `ContactPropertyType.Unknown`.
 
 ### Topics
 
@@ -369,6 +386,14 @@ await client.SegmentUpdateAsync(id, new SegmentUpdateOptions { Name = "Pro tier"
 await client.SegmentContactListAsync(id, new ListOptions { Limit = 100 }); // GET /segments/{id}/contacts
 await client.SegmentContactListAsync(id, new ContactListOptions { Include = new() { ContactInclude.Properties } }); // ?include=properties
 await client.SegmentDeleteAsync(id);
+```
+
+`created_at` and every `property:<key>` also take date ops. `before` and `after`
+take an ISO 8601 date or date-time. `in_last_days` and `not_in_last_days` take a
+whole number of days, from 1 to 36500, as a string:
+
+```csharp
+new SegmentCondition { Field = "property:last_login", Op = "not_in_last_days", Value = "90" }
 ```
 
 ### Suppressions
@@ -704,7 +729,8 @@ Method names and payload shapes otherwise line up. Notes:
   **segments** (saved filters) above.
 - **Templates** exist but template-based *sending* does not yet: `EmailMessage.Template`
   is put on the wire and the server answers 422.
-- **MillionSend extensions** (no Resend counterpart): segments, contact batch import,
+- **MillionSend extensions** (no Resend counterpart): segments, the `Date` contact
+  property type, contact batch import,
   batch get and batch remove, `include=` on contact lists, `erase` on contact deletes,
   contact preference links, webhook secret rotation, usage, email insights, deliverability,
   and on received mail and inboxes the long-poll `Wait`, received-mail reply/forward/delete,
@@ -724,6 +750,7 @@ On a self-hosted instance, each feature needs at least this MillionSend version:
 | v0.14.0 | `Shared`, `SendingMode` and `SendingModeReason` on domains; `DomainId` on `InboxCreateAsync`; `Subject` up to 998 characters |
 | v0.15.1 | `email.scheduled`, `email.failed` and `email.suppressed` webhook events; `source_id` on `suppression.added` and `suppression.removed`; the `suppressed` email kept for an all-suppressed `EmailSendAsync` |
 | v0.16.0 | Release rules: `trustSender` only for a `not_allowlisted` hold from an authenticated sender (`trust_not_allowed`); screening at release (`held_by_screening`) |
+| v0.22.0 | `ContactPropertyType.Date`; the `before`, `after`, `in_last_days` and `not_in_last_days` segment ops on `created_at` and properties |
 
 Older servers ignore options they don't know: before v0.12.0 `Username` is dropped
 and the address is random, before v0.14.0 `DomainId` is dropped, and before v0.13.0

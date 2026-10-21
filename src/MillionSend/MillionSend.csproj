@@ -8,7 +8,7 @@
     <GenerateDocumentationFile>false</GenerateDocumentationFile>
 
     <PackageId>MillionSend</PackageId>
-    <Version>0.9.0</Version>
+    <Version>0.10.0</Version>
     <Authors>MillionSend</Authors>
     <Description>Official .NET SDK for MillionSend — a self-hostable, Resend-wire-compatible email API. Emails, batches, contacts, contact properties, topics, broadcasts, segments, suppressions, domains, webhooks, API keys, templates, usage, received mail and inboxes.</Description>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
