@@ -20,7 +20,7 @@ namespace MillionSend;
 public sealed class MillionSendClient : IMillionSend
 {
     private const string DefaultBaseUrl = "https://api.millionsend.com";
-    private const string Version = "0.9.0";
+    private const string Version = "0.10.0";
 
     private static readonly JsonSerializerOptions Json = new()
     {
@@ -169,7 +169,7 @@ public sealed class MillionSendClient : IMillionSend
     }
 
     /// <summary>Enum member as the API spells it (snake_case), for headers and query strings.</summary>
-    private static string Wire(Enum value) => JsonNamingPolicy.SnakeCaseLower.ConvertName(value.ToString());
+    internal static string Wire(Enum value) => JsonNamingPolicy.SnakeCaseLower.ConvertName(value.ToString());
 
     private static string QueryString(IReadOnlyDictionary<string, object?>? query)
     {

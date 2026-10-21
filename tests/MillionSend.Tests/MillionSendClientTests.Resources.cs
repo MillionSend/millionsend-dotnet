@@ -418,6 +418,41 @@ public partial class MillionSendClientTests
         Assert.Equal($"/contact-properties/{P1}", handler.Last.Path);
     }
 
+    [Fact]
+    public async Task ContactProps_create_a_date_property()
+    {
+        var (client, handler) = NewClient(h => h.ResponseBody = $$"""
+            { "object": "contact_property", "id": "{{P1}}", "key": "last_login", "type": "date",
+              "fallback_value": "2026-01-08", "created_at": "2026-01-01T00:00:00Z" }
+            """);
+
+        var created = await client.ContactPropCreateAsync(new ContactPropertyCreateOptions
+        {
+            Key = "last_login", Type = ContactPropertyType.Date, FallbackValue = "2026-01-08",
+        });
+        AssertJson("""{ "key": "last_login", "type": "date", "fallback_value": "2026-01-08" }""", handler.Last.Body);
+        Assert.Equal(ContactPropertyType.Date, created.Content!.Type);
+    }
+
+    [Fact]
+    public async Task ContactProps_list_reads_date_and_a_type_newer_than_the_sdk()
+    {
+        var (client, _) = NewClient(h => h.ResponseBody = $$"""
+            { "object": "list", "has_more": false, "data": [
+              { "object": "contact_property", "id": "{{P1}}", "key": "last_login", "type": "date",
+                "fallback_value": null, "created_at": "2026-01-01T00:00:00Z" },
+              { "object": "contact_property", "id": "{{X1}}", "key": "vip", "type": "boolean",
+                "fallback_value": null, "created_at": "2026-01-01T00:00:00Z" }
+            ] }
+            """);
+
+        var res = await client.ContactPropListAsync();
+        Assert.True(res.Success, res.Exception?.Message);
+        Assert.Collection(res.Content!.Data,
+            p => Assert.Equal(ContactPropertyType.Date, p.Type),
+            p => Assert.Equal(ContactPropertyType.Unknown, p.Type));
+    }
+
     // ---- topics / segments extras ---------------------------------------
 
     [Fact]
